@@ -154,11 +154,21 @@ class Tensor:
         return out
 
     def clamp(self, min_val=None, max_val=None):
-        """Clamp tensor values to [min, max] range."""
+        """Clamp tensor values to [min, max] range.
+
+        FIX: original code only applied the mask when BOTH min_val and max_val
+        were provided. One-sided clamps (e.g. clamp(min_val=0)) incorrectly
+        passed gradients through clamped positions.
+        Now each boundary is checked independently.
+        """
         out = Tensor(np.clip(self.data, min_val, max_val), (self,), self.requires_grad)
 
         def _backward():
-            mask = (self.data >= min_val) & (self.data <= max_val) if min_val is not None and max_val is not None else np.ones_like(self.data)
+            mask = np.ones_like(self.data, dtype=bool)
+            if min_val is not None:
+                mask &= (self.data >= min_val)
+            if max_val is not None:
+                mask &= (self.data <= max_val)
             self.grad += out.grad * mask
 
         out._backward = _backward
@@ -252,21 +262,40 @@ class Tensor:
         return out
 
     def sum(self, axis=None, keepdims=False):
-        """Sum over specified axis. Gradient: broadcast gradient back."""
+        """Sum over specified axis. Gradient: broadcast gradient back.
+
+        FIX: original code used `np.ones_like(self.data) * out.grad` which
+        crashes when axis reduces a dimension (shape mismatch).
+        Now restores the reduced dimension with expand_dims before broadcasting.
+        """
         out = Tensor(self.data.sum(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
 
         def _backward():
-            self.grad += np.ones_like(self.data) * out.grad
+            grad = out.grad
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+            self.grad += np.broadcast_to(grad, self.data.shape)
 
         out._backward = _backward
         return out
 
     def mean(self, axis=None, keepdims=False):
-        """Mean over specified axis."""
+        """Mean over specified axis.
+
+        FIX: same shape-broadcast issue as sum. Restores reduced dimension
+        before broadcasting, then divides by the number of averaged elements.
+        """
         out = Tensor(self.data.mean(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
 
         def _backward():
-            self.grad += np.ones_like(self.data) * out.grad / self.data.size
+            grad = out.grad
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+            if axis is None:
+                n = self.data.size
+            else:
+                n = self.data.shape[axis] if isinstance(axis, int) else np.prod([self.data.shape[a] for a in axis])
+            self.grad += np.broadcast_to(grad, self.data.shape) / n
 
         out._backward = _backward
         return out

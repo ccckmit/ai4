@@ -12,13 +12,20 @@ from .tensor import Tensor
 
 
 def mse_loss(input, target):
-    """Mean Squared Error loss."""
+    """Mean Squared Error loss.
+
+    FIX: original _backward read diff.grad, which is always zero because
+    diff = input - target is an intermediate node created outside the
+    autograd graph registered to `out`. backward() never traverses diff.
+    Now computes the gradient directly from diff.data (the stored values).
+    """
     diff = input - target
     out = Tensor(np.mean(diff.data ** 2), (input, target), input.requires_grad or target.requires_grad)
 
     def _backward():
-        input.grad += 2 * diff.grad * diff.data / np.prod(diff.data.shape)
-        target.grad += -2 * diff.grad * diff.data / np.prod(diff.data.shape)
+        N = np.prod(diff.data.shape)
+        input.grad  += out.grad * 2 * diff.data / N
+        target.grad += out.grad * -2 * diff.data / N
 
     out._backward = _backward
     return out
@@ -41,7 +48,7 @@ class Module:
                 params.append(v)
             elif isinstance(v, Module):
                 params.extend(v.parameters())
-            elif isinstance(v, list):
+            elif isinstance(v, (list, tuple)):
                 for item in v:
                     if isinstance(item, Module):
                         params.extend(item.parameters())
