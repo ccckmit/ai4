@@ -68,6 +68,7 @@ def train() -> None:
             for i in range(batch_size):
                 loss -= np.log(probs[i, labels_np[i]] + 1e-10)
             loss /= batch_size
+            print('loss=', loss)
 
             loss_tensor = Tensor(loss, (logits,), True)
 

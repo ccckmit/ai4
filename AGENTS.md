@@ -7,28 +7,33 @@
 - **nn/** — DIY 深度學習框架（NumPy 自動微分 + Transformer）
 - **ml/** — 機器學習工具箱（線性模型、決策樹、集成、聚類、PCA 等）
 
+另有對應的 TypeScript 實作（`*.ts`）用 `npx tsx` 執行。
+
 ## 測試與執行
 
 ```bash
-# 執行所有測試（使用 uv + pytest）
-./test.sh
+# Python 測試（使用 uv + pytest）
+./pytest.sh
 
-# 執行所有範例
-./run.sh
+# TypeScript 測試（使用 npx tsx）
+./jstest.sh
 ```
 
 ## 世界（World）— 強化學習環境
 
 ### 執行測試
 ```bash
+# Python
 uv run pytest world/tests
+
+# TypeScript
+npx tsx world/tests/test_world.ts
 ```
 
-### 執行範例
+### 範例
 ```bash
 PYTHONPATH=. uv run python world/examples/frozen_lake_example.py   # Q-Learning
 PYTHONPATH=. uv run python world/examples/cartpole_example.py       # PD 控制器
-PYTHONPATH=. uv run python world/examples/frozenlake_qtable.py      # SARSA, TD(λ)
 ```
 
 ### API
@@ -46,10 +51,17 @@ obs, reward, terminated, truncated, info = result  # 可解包
 
 ### 執行測試
 ```bash
+# Python
 uv run pytest nn/tests
+
+# TypeScript
+npx tsx nn/tests/test_nn.ts
+npx tsx nn/tests/test_tensor.ts
+npx tsx nn/tests/test_by_claude.ts
+npx tsx nn/tests/test_gpt.ts
 ```
 
-### 執行範例
+### 範例
 ```bash
 uv run python -m nn.chargpt_demo   # 訓練 CharGPT 生成中文名字
 ```
@@ -58,27 +70,26 @@ uv run python -m nn.chargpt_demo   # 訓練 CharGPT 生成中文名字
 ```python
 from nn import Tensor, cat, Module, Linear, Embedding, RMSNorm, Adam, GPT
 
-# 手動建立神經網路
 a = Tensor([[1, 2]], requires_grad=True)
 b = Tensor([[3, 4]], requires_grad=True)
 c = a @ b
 loss = c.sum()
 loss.backward()
 print(a.grad)
-
-# 建立 GPT 模型
-model = GPT(vocab_size=100, block_size=32, n_layer=2, n_embd=32, n_head=4)
-logits, caches = model(token_ids, kv_caches=None)
 ```
 
 ## ML 工具箱
 
 ### 執行測試
 ```bash
+# Python
 uv run pytest ml/tests
+
+# TypeScript
+npx tsx ml/tests/test_ml.ts
 ```
 
-### 執行範例
+### 範例
 ```bash
 PYTHONPATH=. uv run python ml/examples/example.py
 ```
@@ -97,26 +108,25 @@ predictions = model.predict(X_test)
 
 ## 特殊約定
 
-- **使用 uv** — 所有腳本使用 `uv run python` 或 `uv run pytest`
-- **PYTHONPATH** — `test.sh` 和 `run.sh` 自動設定 `PYTHONPATH=.`
+- **使用 uv** — 所有 Python 腳本使用 `uv run python` 或 `uv run pytest`
+- **PYTHONPATH** — `pytest.sh` 自動設定 `PYTHONPATH=.`
+- **TypeScript** — 使用 `npx tsx` 執行 `.ts` 檔案
 - **input.txt 自動下載** — `chargpt_demo.py` 會自動下載 `names.txt`
 
-## 測試腳本約定
+## 測試檔案對應
 
-```bash
-#!/bin/bash
-set -x
-
-export PYTHONPATH="$(dirname "$0")"
-
-uv run pytest world/tests
-uv run pytest nn/tests
-uv run pytest ml/tests
-```
+| Python | TypeScript |
+|---------|------------|
+| `world/tests/test_world.py` | `world/tests/test_world.ts` |
+| `nn/tests/test_nn.py` | `nn/tests/test_nn.ts` |
+| `nn/tests/test_tensor.py` | `nn/tests/test_tensor.ts` |
+| `nn/tests/test_by_claude.py` | `nn/tests/test_by_claude.ts` |
+| `nn/tests/test_gpt.py` | `nn/tests/test_gpt.ts` |
+| `ml/tests/test_ml.py` | `ml/tests/test_ml.ts` |
 
 ## 文檔位置
 
-- **\_wiki/** — 知識庫概念文章（繁體中文，~300 行/篇）
+- **\_wiki/** — 知識庫概念文章（繁體中文）
   - Q-Learning.md, Reinforcement-Learning.md, Backpropagation.md
   - Transformer.md, Attention-Mechanism.md, RMSNorm.md, GPT.md, Gradient-Descent.md
 - **nn/tensor.md** — 自動微分理論
