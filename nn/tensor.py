@@ -223,11 +223,17 @@ class Tensor:
         """
         targets_data = np.asarray(targets.data if isinstance(targets, Tensor) else targets, dtype=np.int64)
         logits = self.data
+        original_ndim = logits.ndim
+
+        if logits.ndim == 2:
+            logits = logits[:, np.newaxis, :]
+            targets_data = targets_data.reshape(-1, 1)
+
         max_logits = np.max(logits, axis=-1, keepdims=True)
         exps = np.exp(logits - max_logits)
         probs = exps / np.sum(exps, axis=-1, keepdims=True)
 
-        batch_size, seq_len = targets_data.shape
+        batch_size, seq_len, vocab_size = logits.shape
         loss = 0.0
         for b in range(batch_size):
             for t in range(seq_len):
@@ -242,7 +248,10 @@ class Tensor:
                 for t in range(seq_len):
                     d_logits[b, t, targets_data[b, t]] -= 1
             d_logits = d_logits / (batch_size * seq_len)
-            self.grad += out.grad * d_logits
+            if original_ndim == 2:
+                self.grad += (out.grad * d_logits.squeeze(1))
+            else:
+                self.grad += out.grad * d_logits
 
         out._backward = _backward
         return out

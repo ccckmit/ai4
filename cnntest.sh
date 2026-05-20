@@ -1,0 +1,1 @@
+uv run pytest nn/tests/test_cnn_gemini.py
