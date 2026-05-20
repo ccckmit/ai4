@@ -2,5 +2,5 @@
 # PYTHONPATH=. python world/examples/bipedalwalker_torch.py --steps 100000
 # PYTHONPATH=. uv run pytest world/tests/test_world.py -v
 # source /Users/cccuser/.venv/bin/activate
-PYTHONPATH=. python world/examples/cartpole_closed_form.py
-# PYTHONPATH=. python world/examples/cartpole_vpg.py
+# PYTHONPATH=. python world/examples/cartpole_closed_form.py
+PYTHONPATH=. python world/examples/cartpole_vpg.py
