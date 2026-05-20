@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai4"
+version = "0.2.0"
+description = "A DIY AI Framework for Python: RL environments, NumPy neural networks, and ML toolkit"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Chung-Cheng Chen", email = "ccc@kmol.info"}
+]
+keywords = ["machine-learning", "deep-learning", "reinforcement-learning", "neural-network", "gpt", "transformer"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+]
+torch = [
+    "torch>=2.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/cccnqu/ai4"
+Documentation = "https://github.com/cccnqu/ai4#readme"
+Repository = "https://github.com/cccnqu/ai4"
+
+[tool.setuptools]
+packages = [
+    "world",
+    "world.envs",
+    "world.spaces",
+    "world.wrappers",
+    "world.utils",
+    "nn",
+    "ml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["world/tests", "nn/tests", "ml/tests"]

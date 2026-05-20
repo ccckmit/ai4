@@ -1,0 +1,1 @@
+PYTHONPATH=. python world/examples/bipedalwalker_sac.py --steps 100000

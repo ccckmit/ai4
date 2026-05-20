@@ -1,18 +1,18 @@
-# 重構計畫：整合 nn2kv 與 world 至 ai4py
+# 重構計畫：整合 nn2kv 與 world 至 ai4
 
 ## 目標
 
 達成以下使用方式：
 ```python
-from ai4py import nn, world    # 主要用法
+from ai4 import nn, world    # 主要用法
 import world; world.make(...)  # 向後相容
 ```
 
 ## 最終目錄結構
 
 ```
-ai4py/                          # 頂層 Python 套件（需 __init__.py）
-├── __init__.py                 # from ai4py import nn, world
+ai4/                          # 頂層 Python 套件（需 __init__.py）
+├── __init__.py                 # from ai4 import nn, world
 │
 ├── world/                      # 子包 world/
 │   ├── __init__.py
@@ -65,9 +65,9 @@ world/                 # 外層只是資料夾
 └── README.md
 ```
 
-**目標**：`world/` 成為 ai4py 下的子包
+**目標**：`world/` 成為 ai4 下的子包
 ```
-ai4py/world/           # 直接是 Python 套件
+ai4/world/           # 直接是 Python 套件
 ├── __init__.py
 ├── core.py            # 從 world/world/core.py 移上來
 ├── envs/              # 從 world/world/envs/ 移上來
@@ -79,7 +79,7 @@ ai4py/world/           # 直接是 Python 套件
 
 **執行**：
 ```bash
-cd /Users/Shared/ccc/project/ai4py
+cd /Users/Shared/ccc/project/ai4
 
 # 將 world/world/ 的內容移到 world/（提升一層）
 mv world/world/* world/
@@ -147,10 +147,10 @@ __all__ = [
 
 ---
 
-### 步驟 3：建立 ai4py/__init__.py（頂層入口）
+### 步驟 3：建立 ai4/__init__.py（頂層入口）
 
 ```python
-"""ai4py - DIY AI Framework for Python
+"""ai4 - DIY AI Framework for Python
 
 Subpackages
 -----------
@@ -159,7 +159,7 @@ nn    : Neural network framework (NumPy-based)
 
 Examples
 --------
->>> from ai4py import world, nn
+>>> from ai4 import world, nn
 >>> env = world.make("FrozenLake-v1")
 """
 
@@ -171,9 +171,9 @@ __all__ = ["world", "nn"]
 
 ---
 
-### 步驟 4：建立 ai4py/README.md
+### 步驟 4：建立 ai4/README.md
 
-統一說明 ai4py 的兩個子包。
+統一說明 ai4 的兩個子包。
 
 ---
 
@@ -203,17 +203,17 @@ from world.core import ...
 
 ```bash
 # 測試主要用法
-cd /Users/Shared/ccc/project/ai4py
-python -c "from ai4py import nn, world; print(world.__name__, nn.__name__)"
+cd /Users/Shared/ccc/project/ai4
+python -c "from ai4 import nn, world; print(world.__name__, nn.__name__)"
 
 # 測量子包獨立使用（向後相容）
 python -c "import world; env = world.make('FrozenLake-v1')"
 
 # 測試 nn
-cd ai4py/nn/nn && uv run chargpt_demo.py
+cd ai4/nn/nn && uv run chargpt_demo.py
 
 # 測試 world
-cd ai4py/world && python tests/test_world.py
+cd ai4/world && python tests/test_world.py
 ```
 
 ---
@@ -231,11 +231,11 @@ cd ai4py/world && python tests/test_world.py
 
 ## 注意事項
 
-1. **雙層 vs 三層** — 此結構是 `ai4py/world/` 和 `ai4py/nn/` 雙層，無需 `ai4py/world/world/` 的第三層。
+1. **雙層 vs 三層** — 此結構是 `ai4/world/` 和 `ai4/nn/` 雙層，無需 `ai4/world/world/` 的第三層。
 
 2. **world/ 內部引用** — `world/core.py`、`world/envs/__init__.py` 等之間的 import 需要改為相對匯入（如 `from .spaces import Discrete`）或保持 `world.` prefix。
 
-3. **安裝方式** — 使用者安裝 ai4py 後，無需知道內部結構，直接 `from ai4py import world, nn`。
+3. **安裝方式** — 使用者安裝 ai4 後，無需知道內部結構，直接 `from ai4 import world, nn`。
 
 4. **input.txt** — `chargpt_demo.py` 會在缺少時自動下載，不隨套件分發。
 
@@ -245,7 +245,7 @@ cd ai4py/world && python tests/test_world.py
 - [ ] 建立 world/__init__.py
 - [ ] 建立 nn/nn/結構成 nn2kv 檔案
 - [ ] 修改 nn2kv 的 import 為相對匯入
-- [ ] 建立 ai4py/__init__.py
+- [ ] 建立 ai4/__init__.py
 - [ ] 處理 world/ 內部 import
-- [ ] 建立統一的 ai4py/README.md
+- [ ] 建立統一的 ai4/README.md
 - [ ] 驗證所有用法

@@ -1,4 +1,4 @@
-# ai4py
+# ai4
 
 A DIY AI Framework for Python, consisting of two independent subpackages:
 
@@ -10,7 +10,7 @@ A DIY AI Framework for Python, consisting of two independent subpackages:
 ### world (RL Environments)
 
 ```python
-from ai4py import world
+from ai4 import world
 
 env = world.make("FrozenLake-v1")
 obs, info = env.reset(seed=42)
@@ -20,7 +20,7 @@ result = env.step(env.action_space.sample())
 ### nn (Neural Networks)
 
 ```python
-from ai4py import nn
+from ai4 import nn
 from nn import GPT
 
 model = GPT(vocab_size=100, block_size=16, n_layer=1, n_embd=16, n_head=4)
@@ -30,7 +30,7 @@ model = GPT(vocab_size=100, block_size=16, n_layer=1, n_embd=16, n_head=4)
 
 ```bash
 # world tests
-cd /Users/Shared/ccc/project/ai4py
+cd /Users/Shared/ccc/project/ai4
 python world/tests/test_world.py
 
 # world examples
@@ -54,8 +54,8 @@ pip install numpy
 ## Project Structure
 
 ```
-ai4py/
-├── __init__.py          # from ai4py import world, nn
+ai4/
+├── __init__.py          # from ai4 import world, nn
 ├── world/               # RL environment framework
 │   ├── __init__.py
 │   ├── core.py          # Env, StepResult

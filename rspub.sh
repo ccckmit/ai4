@@ -1,0 +1,2 @@
+cargo login
+cargo publish

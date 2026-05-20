@@ -18,15 +18,21 @@ ActType = TypeVar("ActType")
 
 @dataclass
 class StepResult(Generic[ObsType]):
-    """Structured return value from Env.step().
+    """
+    Structured return value from Env.step().
 
     Attributes
     ----------
     observation : ObsType
+        Current state/observation from the environment.
     reward : float
-    terminated : bool  -- terminal state reached
-    truncated : bool   -- time limit / artificial cutoff
-    info : dict        -- auxiliary diagnostics
+        Immediate reward received for the action.
+    terminated : bool
+        Whether the episode ended due to a terminal state (success/failure).
+    truncated : bool
+        Whether the episode was cut off artificially (e.g., time limit).
+    info : dict
+        Auxiliary diagnostics (unused fields, internal state, etc.).
     """
 
     observation: ObsType
@@ -36,6 +42,7 @@ class StepResult(Generic[ObsType]):
     info: Dict[str, Any] = field(default_factory=dict)
 
     def __iter__(self):
+        """Supports tuple unpacking: obs, reward, terminated, truncated, info = env.step(a)"""
         yield self.observation
         yield self.reward
         yield self.terminated
@@ -44,17 +51,21 @@ class StepResult(Generic[ObsType]):
 
     @property
     def done(self) -> bool:
+        """True if episode ended for any reason (terminal or truncated)."""
         return self.terminated or self.truncated
 
 
 class Env(abc.ABC, Generic[ObsType, ActType]):
-    """The main world environment interface.
+    """
+    The main world environment interface.
 
     Subclasses must implement:
         reset(), step(), observation_space, action_space
 
     Optionally override:
         render(), close(), seed()
+
+    Design follows OpenAI Gym conventions for interoperability.
     """
 
     metadata: Dict[str, Any] = {}
@@ -92,12 +103,15 @@ class Env(abc.ABC, Generic[ObsType, ActType]):
     # ------------------------------------------------------------------ #
 
     def render(self) -> Optional[Any]:
+        """Render the environment (e.g., ASCII art, GUI). Returns None by default."""
         return None
 
     def close(self) -> None:
+        """Clean up resources."""
         pass
 
     def seed(self, seed: Optional[int] = None) -> List[int]:
+        """Set random seed; returns the actual seed used."""
         self._np_random = np.random.default_rng(seed)
         return [seed or 0]
 
@@ -106,6 +120,7 @@ class Env(abc.ABC, Generic[ObsType, ActType]):
     # ------------------------------------------------------------------ #
 
     def _init_rng(self, seed: Optional[int]) -> np.random.Generator:
+        """Initializes NumPy random generator for reproducible behavior."""
         self._np_random = np.random.default_rng(seed)
         return self._np_random
 

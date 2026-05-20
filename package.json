@@ -1,0 +1,69 @@
+{
+  "name": "ai4",
+  "version": "0.1.0",
+  "description": "DIY AI Framework for TypeScript: RL environments, tensor autodiff, neural networks, and ML toolkit",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./world": {
+      "types": "./dist/world/index.d.ts",
+      "default": "./dist/world/index.js"
+    },
+    "./world/core": {
+      "types": "./dist/world/core.d.ts",
+      "default": "./dist/world/core.js"
+    },
+    "./nn": {
+      "types": "./dist/nn/index.d.ts",
+      "default": "./dist/nn/index.js"
+    },
+    "./nn/tensor": {
+      "types": "./dist/nn/tensor.d.ts",
+      "default": "./dist/nn/tensor.js"
+    },
+    "./nn/optim": {
+      "types": "./dist/nn/optim.d.ts",
+      "default": "./dist/nn/optim.js"
+    },
+    "./nn/gpt": {
+      "types": "./dist/nn/gpt.d.ts",
+      "default": "./dist/nn/gpt.js"
+    },
+    "./ml": {
+      "types": "./dist/ml/index.d.ts",
+      "default": "./dist/ml/index.js"
+    },
+    "./llm": {
+      "types": "./dist/llm/index.d.ts",
+      "default": "./dist/llm/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "test": "node --test"
+  },
+  "keywords": [
+    "machine-learning",
+    "deep-learning",
+    "reinforcement-learning",
+    "neural-network",
+    "gpt",
+    "transformer",
+    "autodiff"
+  ],
+  "author": "Chung-Cheng Chen",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "typescript": "^5.3.0"
+  }
+}

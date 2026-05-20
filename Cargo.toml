@@ -1,0 +1,17 @@
+[package]
+name = "ai4"
+version = "0.2.0"
+edition = "2021"
+description = "A DIY AI Framework for Rust: RL environments, from-scratch neural networks, and ML toolkit"
+readme = "README.md"
+license = "MIT"
+authors = ["Chung-Cheng Chen <ccc@kmol.info>"]
+keywords = ["machine-learning", "deep-learning", "reinforcement-learning", "neural-network", "gpt", "transformer"]
+categories = ["science", "mathematics"]
+
+[dependencies]
+rand = "0.8"
+rand_distr = "0.4"
+
+[lib]
+path = "lib.rs"

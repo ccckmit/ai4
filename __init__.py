@@ -1,4 +1,4 @@
-"""ai4py - DIY AI Framework for Python.
+"""ai4 - DIY AI Framework for Python.
 
 Subpackages
 -----------
@@ -7,9 +7,9 @@ nn    : Neural network framework (NumPy-based)
 
 Examples
 --------
->>> from ai4py import world, nn
+>>> from ai4 import world, nn
 >>> env = world.make("FrozenLake-v1")
->>> from ai4py import nn
+>>> from ai4 import nn
 >>> from nn import GPT
 """
 
