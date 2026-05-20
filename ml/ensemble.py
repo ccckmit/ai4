@@ -1,18 +1,26 @@
 """Ensemble methods: RandomForest."""
 
+from __future__ import annotations
+
 import numpy as np
 from .tree import DecisionTree
 
 
 class RandomForest:
-    def __init__(self, n_estimators=10, max_depth=10, min_samples_split=2):
-        self.n_estimators = n_estimators
-        self.max_depth = max_depth
-        self.min_samples_split = min_samples_split
-        self.trees = []
-        self.is_classification = True
+    def __init__(
+        self,
+        n_estimators: int = 10,
+        max_depth: int = 10,
+        min_samples_split: int = 2,
+    ) -> None:
+        self.n_estimators: int = n_estimators
+        self.max_depth: int = max_depth
+        self.min_samples_split: int = min_samples_split
+        self.trees: list[DecisionTree] = []
+        self.is_classification: bool = True
+        self.n_classes: int = 0
 
-    def fit(self, X, y):
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         self.is_classification = len(np.unique(y)) < len(y) / 2
         self.n_classes = len(np.unique(y))
         self.trees = []
@@ -26,7 +34,7 @@ class RandomForest:
             tree.fit(X_boot, y_boot)
             self.trees.append(tree)
 
-    def predict(self, X):
+    def predict(self, X: np.ndarray) -> np.ndarray:
         predictions = np.array([tree.predict(X) for tree in self.trees])
         if self.is_classification:
             majority_votes = np.apply_along_axis(lambda x: np.bincount(x.astype(int)).argmax(), 0, predictions)

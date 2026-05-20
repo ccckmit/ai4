@@ -3,10 +3,13 @@ Tensor with automatic differentiation (autograd) based on NumPy.
 Records operation history to support backpropagation through a computation graph.
 """
 
+from __future__ import annotations
+
 import numpy as np
+from typing import Any, Callable, Sequence
 
 
-def unbroadcast(grad, shape):
+def unbroadcast(grad: np.ndarray, shape: tuple[int, ...]) -> np.ndarray:
     """
     Restores broadcast gradients to their original shape.
     When broadcasting expands dimensions, gradients must be summed over
@@ -36,32 +39,37 @@ class Tensor:
         requires_grad: Whether to track gradients for this tensor
     """
 
-    def __init__(self, data, _children=(), requires_grad=False):
-        self.data = np.array(data, dtype=np.float32)
-        self.grad = np.zeros_like(self.data)
-        self._backward = lambda: None
-        self._prev = set(_children)
-        self.requires_grad = requires_grad
+    def __init__(
+        self,
+        data: Any,
+        _children: tuple[Tensor, ...] = (),
+        requires_grad: bool = False,
+    ) -> None:
+        self.data: np.ndarray = np.array(data, dtype=np.float32)
+        self.grad: np.ndarray = np.zeros_like(self.data)
+        self._backward: Callable[[], None] = lambda: None
+        self._prev: set[Tensor] = set(_children)
+        self.requires_grad: bool = requires_grad
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, ...]:
         """Returns the shape of the underlying NumPy array."""
         return self.data.shape
 
-    def zero_grad(self):
+    def zero_grad(self) -> None:
         """Resets gradients to zeros."""
         self.grad = np.zeros_like(self.data)
 
-    def backward(self):
+    def backward(self) -> None:
         """
         Runs backpropagation from this tensor.
         Uses topological sort (逆序) to process nodes in correct order.
         Initializes gradient of this tensor to ones (dL/dL = 1).
         """
-        topo = []
-        visited = set()
+        topo: list[Tensor] = []
+        visited: set[Tensor] = set()
 
-        def build_topo(v):
+        def build_topo(v: Tensor) -> None:
             if v not in visited:
                 visited.add(v)
                 for child in v._prev:
@@ -74,86 +82,80 @@ class Tensor:
         for v in reversed(topo):
             v._backward()
 
-    # --- Basic arithmetic ---
-
-    def __add__(self, other):
+    def __add__(self, other: Tensor | float) -> Tensor:
         other = other if isinstance(other, Tensor) else Tensor(other)
         out = Tensor(self.data + other.data, (self, other), self.requires_grad or other.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += unbroadcast(out.grad, self.data.shape)
             other.grad += unbroadcast(out.grad, other.data.shape)
 
         out._backward = _backward
         return out
 
-    def __mul__(self, other):
+    def __mul__(self, other: Tensor | float) -> Tensor:
         other = other if isinstance(other, Tensor) else Tensor(other)
         out = Tensor(self.data * other.data, (self, other), self.requires_grad or other.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += unbroadcast(out.grad * other.data, self.data.shape)
             other.grad += unbroadcast(out.grad * self.data, other.data.shape)
 
         out._backward = _backward
         return out
 
-    def __matmul__(self, other):
+    def __matmul__(self, other: Tensor) -> Tensor:
         other = other if isinstance(other, Tensor) else Tensor(other)
         out = Tensor(self.data @ other.data, (self, other), self.requires_grad or other.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += unbroadcast(out.grad @ np.swapaxes(other.data, -1, -2), self.data.shape)
             other.grad += unbroadcast(np.swapaxes(self.data, -1, -2) @ out.grad, other.data.shape)
 
         out._backward = _backward
         return out
 
-    # --- Shape operations ---
-
-    def transpose(self, ax1, ax2):
+    def transpose(self, ax1: int, ax2: int) -> Tensor:
         """Swaps two axes. Gradient: swap the gradient axes back."""
         out = Tensor(np.swapaxes(self.data, ax1, ax2), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += np.swapaxes(out.grad, ax1, ax2)
 
         out._backward = _backward
         return out
 
-    def reshape(self, *shape):
+    def reshape(self, *shape: int) -> Tensor:
         """Reshapes tensor. Gradient: reshape gradient back to original shape."""
         out = Tensor(self.data.reshape(*shape), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += out.grad.reshape(self.data.shape)
 
         out._backward = _backward
         return out
 
-    # --- Activation / nonlinear functions ---
-
-    def relu(self):
+    def relu(self) -> Tensor:
         """ReLU: max(0, x). Gradient is 1 where input > 0, else 0."""
         out = Tensor(np.maximum(0, self.data), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += out.grad * (self.data > 0)
 
         out._backward = _backward
         return out
 
-    def tanh(self):
+    def tanh(self) -> Tensor:
         """Tanh: (exp(x) - exp(-x)) / (exp(x) + exp(-x))"""
         out = Tensor(np.tanh(self.data), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += out.grad * (1 - out.data ** 2)
 
         out._backward = _backward
         return out
 
-    def clamp(self, min_val=None, max_val=None):
+    def clamp(self, min_val: float | None = None, max_val: float | None = None) -> Tensor:
         """Clamp tensor values to [min, max] range.
 
         FIX: original code only applied the mask when BOTH min_val and max_val
@@ -163,7 +165,7 @@ class Tensor:
         """
         out = Tensor(np.clip(self.data, min_val, max_val), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             mask = np.ones_like(self.data, dtype=bool)
             if min_val is not None:
                 mask &= (self.data >= min_val)
@@ -174,28 +176,28 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def abs(self):
+    def abs(self) -> Tensor:
         """Absolute value."""
         out = Tensor(np.abs(self.data), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += out.grad * np.sign(self.data)
 
         out._backward = _backward
         return out
 
-    def masked_fill(self, mask, value):
+    def masked_fill(self, mask: np.ndarray, value: float) -> Tensor:
         """Replaces values where mask is True with value. Gradient: mask out gradient at True positions."""
         out_data = np.where(mask, value, self.data)
         out = Tensor(out_data, (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += np.where(mask, 0, out.grad)
 
         out._backward = _backward
         return out
 
-    def softmax(self, axis=-1):
+    def softmax(self, axis: int = -1) -> Tensor:
         """
         Softmax along given axis.
         Gradient: diag(softmax) - softmax @ softmax^T (Jacobian of softmax).
@@ -205,7 +207,7 @@ class Tensor:
         probs = exps / np.sum(exps, axis=axis, keepdims=True)
         out = Tensor(probs, (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             s = out.data
             grad_s = out.grad
             self.grad += s * (grad_s - np.sum(grad_s * s, axis=axis, keepdims=True))
@@ -213,7 +215,7 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def cross_entropy(self, targets):
+    def cross_entropy(self, targets: Tensor | np.ndarray) -> Tensor:
         """
         Cross-entropy loss for classification.
         targets: integer labels of shape (batch, seq_len) or (batch,)
@@ -234,7 +236,7 @@ class Tensor:
 
         out = Tensor(loss, (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             d_logits = probs.copy()
             for b in range(batch_size):
                 for t in range(seq_len):
@@ -245,23 +247,28 @@ class Tensor:
         out._backward = _backward
         return out
 
-    # Python Magic Methods
+    def __sub__(self, other: Tensor | float) -> Tensor:
+        return self + (other * -1)
 
-    def __sub__(self, other): return self + (other * -1)
-    def __truediv__(self, other): return self * (other ** -1)
-    def __radd__(self, other): return self + other
-    def __rmul__(self, other): return self * other
+    def __truediv__(self, other: float) -> Tensor:
+        return self * (other ** -1)
 
-    def __pow__(self, power):
+    def __radd__(self, other: float) -> Tensor:
+        return self + other
+
+    def __rmul__(self, other: float) -> Tensor:
+        return self * other
+
+    def __pow__(self, power: float) -> Tensor:
         out = Tensor(self.data ** power, (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             self.grad += out.grad * (power * self.data ** (power - 1))
 
         out._backward = _backward
         return out
 
-    def sum(self, axis=None, keepdims=False):
+    def sum(self, axis: int | None = None, keepdims: bool = False) -> Tensor:
         """Sum over specified axis. Gradient: broadcast gradient back.
 
         FIX: original code used `np.ones_like(self.data) * out.grad` which
@@ -270,7 +277,7 @@ class Tensor:
         """
         out = Tensor(self.data.sum(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             grad = out.grad
             if axis is not None and not keepdims:
                 grad = np.expand_dims(grad, axis=axis)
@@ -279,7 +286,7 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def mean(self, axis=None, keepdims=False):
+    def mean(self, axis: int | tuple[int, ...] | None = None, keepdims: bool = False) -> Tensor:
         """Mean over specified axis.
 
         FIX: same shape-broadcast issue as sum. Restores reduced dimension
@@ -287,7 +294,7 @@ class Tensor:
         """
         out = Tensor(self.data.mean(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
 
-        def _backward():
+        def _backward() -> None:
             grad = out.grad
             if axis is not None and not keepdims:
                 grad = np.expand_dims(grad, axis=axis)
@@ -300,11 +307,11 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def __neg__(self):
+    def __neg__(self) -> Tensor:
         return self * -1
 
 
-def cat(tensors, axis=0):
+def cat(tensors: Sequence[Tensor], axis: int = 0) -> Tensor:
     """
     Concatenates tensors along given axis.
     Backward: splits gradient along concatenation axis, distributes to original tensors.
@@ -314,7 +321,7 @@ def cat(tensors, axis=0):
     requires_grad = any(t.requires_grad for t in tensors)
     out = Tensor(data, tuple(tensors), requires_grad)
 
-    def _backward():
+    def _backward() -> None:
         if not out.requires_grad:
             return
         split_sizes = [t.data.shape[axis] for t in tensors]

@@ -10,6 +10,10 @@ export function register(id: string, cls: EnvCtor): void {
   REGISTRY[id] = cls;
 }
 
+export function registry(): Record<string, EnvCtor> {
+  return { ...REGISTRY };
+}
+
 export function make(id: string, ...args: unknown[]): Env {
   if (!REGISTRY[id]) {
     throw new Error(`Unknown env: ${id}. Available: ${Object.keys(REGISTRY).join(', ')}`);

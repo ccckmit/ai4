@@ -1,16 +1,18 @@
 """Dimensionality reduction: PCA."""
 
+from __future__ import annotations
+
 import numpy as np
 
 
 class PCA:
-    def __init__(self, n_components=None):
-        self.n_components = n_components
-        self.components = None
-        self.mean = None
-        self.explained_variance = None
+    def __init__(self, n_components: int | None = None) -> None:
+        self.n_components: int | None = n_components
+        self.components: np.ndarray | None = None
+        self.mean: np.ndarray | None = None
+        self.explained_variance: np.ndarray | None = None
 
-    def fit(self, X):
+    def fit(self, X: np.ndarray) -> PCA:
         self.mean = np.mean(X, axis=0)
         X_centered = X - self.mean
         cov = np.cov(X_centered, rowvar=False)
@@ -26,13 +28,13 @@ class PCA:
         self.explained_variance = eigenvalues[: self.n_components]
         return self
 
-    def transform(self, X):
+    def transform(self, X: np.ndarray) -> np.ndarray:
         X_centered = X - self.mean
         return np.dot(X_centered, self.components.T)
 
-    def fit_transform(self, X):
+    def fit_transform(self, X: np.ndarray) -> np.ndarray:
         self.fit(X)
         return self.transform(X)
 
-    def inverse_transform(self, X_transformed):
+    def inverse_transform(self, X_transformed: np.ndarray) -> np.ndarray:
         return np.dot(X_transformed, self.components) + self.mean

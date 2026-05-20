@@ -28,7 +28,7 @@ export class Linear extends Module {
       true
     );
     this.bias = bias
-      ? Tensor.from(Array(out_features).fill(0).map(() => 0), true)
+      ? Tensor.from([Array(out_features).fill(0)], true)
       : null;
   }
 

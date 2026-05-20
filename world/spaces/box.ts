@@ -15,12 +15,16 @@ export class Box extends Space {
   }
 
   sample(): number[] {
-    return this.shape.map((_, i) =>
+    return Array.from({ length: this.shape[0] }, (_, i) =>
       this.low[i] + Math.random() * (this.high[i] - this.low[i])
     );
   }
 
-  contains(_x: number[]): boolean {
+  contains(x: number[]): boolean {
+    if (x.length !== this.shape[0]) return false;
+    for (let i = 0; i < x.length; i++) {
+      if (x[i] < this.low[i] || x[i] > this.high[i]) return false;
+    }
     return true;
   }
 }

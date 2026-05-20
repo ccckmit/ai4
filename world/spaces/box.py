@@ -1,5 +1,6 @@
 """world/spaces/box.py"""
 from __future__ import annotations
+
 from typing import Optional, Tuple, Union
 import numpy as np
 
@@ -22,9 +23,9 @@ class Box:
         low: Union[float, np.ndarray],
         high: Union[float, np.ndarray],
         shape: Optional[Tuple[int, ...]] = None,
-        dtype=np.float32,
+        dtype: np.dtype = np.float32,
         seed: Optional[int] = None,
-    ):
+    ) -> None:
         self.dtype = np.dtype(dtype)
 
         if shape is None:
@@ -34,7 +35,7 @@ class Box:
         else:
             shape = tuple(shape)
 
-        self.shape = shape
+        self.shape: Tuple[int, ...] = shape
         self.low = np.full(shape, low, dtype=self.dtype)
         self.high = np.full(shape, high, dtype=self.dtype)
         self._rng = np.random.default_rng(seed)
@@ -46,17 +47,17 @@ class Box:
         low[low == -np.inf] = -3.4e38
         return (self._rng.random(self.shape) * (high - low) + low).astype(self.dtype)
 
-    def contains(self, x) -> bool:
+    def contains(self, x: object) -> bool:
         x = np.asarray(x, dtype=self.dtype)
         return x.shape == self.shape and bool(np.all(x >= self.low) and np.all(x <= self.high))
 
-    def seed(self, seed: Optional[int] = None):
+    def seed(self, seed: Optional[int] = None) -> None:
         self._rng = np.random.default_rng(seed)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"Box({self.low}, {self.high}, shape={self.shape}, dtype={self.dtype})"
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         return (
             isinstance(other, Box)
             and self.shape == other.shape

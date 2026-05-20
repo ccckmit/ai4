@@ -6,6 +6,8 @@ Block: single Transformer block
 GPT: full language model
 """
 
+from __future__ import annotations
+
 import numpy as np
 from .tensor import Tensor, cat
 from .nn import Module, Linear, Embedding, RMSNorm
@@ -21,17 +23,20 @@ class CausalSelfAttention(Module):
     entire sequence history for each new token.
     """
 
-    def __init__(self, n_embd, n_head):
-        self.n_head = n_head
-        self.head_dim = n_embd // n_head  # Dimension per attention head
+    def __init__(self, n_embd: int, n_head: int) -> None:
+        self.n_head: int = n_head
+        self.head_dim: int = n_embd // n_head
 
-        # Q, K, V projection matrices
         self.wq = Linear(n_embd, n_embd)
         self.wk = Linear(n_embd, n_embd)
         self.wv = Linear(n_embd, n_embd)
         self.wo = Linear(n_embd, n_embd)
 
-    def __call__(self, x, kv_cache=None):
+    def __call__(
+        self,
+        x: Tensor,
+        kv_cache: tuple[Tensor, Tensor] | None = None,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor]]:
         """
         Forward pass with optional KV cache.
 
@@ -45,25 +50,19 @@ class CausalSelfAttention(Module):
         """
         B, T, C = x.data.shape
 
-        # Project and reshape for multi-head attention: (B, T, n_head, head_dim)
         q = self.wq(x).reshape(B, T, self.n_head, self.head_dim).transpose(1, 2)
         k = self.wk(x).reshape(B, T, self.n_head, self.head_dim).transpose(1, 2)
         v = self.wv(x).reshape(B, T, self.n_head, self.head_dim).transpose(1, 2)
 
-        # Concatenate past K/V with current K/V if cache exists
         if kv_cache is not None:
             past_k, past_v = kv_cache
             k = cat([past_k, k], axis=2)
             v = cat([past_v, v], axis=2)
 
-        T_k = k.data.shape[2]  # Total sequence length (including cache)
+        T_k = k.data.shape[2]
 
-        # Scaled dot-product attention
         attn_logits = (q @ k.transpose(-2, -1)) * (self.head_dim ** -0.5)
 
-        # Causal mask: prevent attending to future tokens
-        # During training (T > 1): apply upper-triangular mask
-        # During inference (T == 1): no mask needed (already causal)
         if T > 1:
             mask = np.triu(np.ones((T, T_k)), k=1) == 1
             attn_logits = attn_logits.masked_fill(mask, float("-inf"))
@@ -71,7 +70,6 @@ class CausalSelfAttention(Module):
         attn_weights = attn_logits.softmax(axis=-1)
         out = attn_weights @ v
 
-        # Reshape back to (B, T, C)
         out = out.transpose(1, 2).reshape(B, T, C)
 
         return self.wo(out), (k, v)
@@ -83,11 +81,11 @@ class MLP(Module):
     Expands to 4x hidden dimension, applies GELU, then projects back.
     """
 
-    def __init__(self, n_embd):
+    def __init__(self, n_embd: int) -> None:
         self.fc1 = Linear(n_embd, 4 * n_embd)
         self.fc2 = Linear(4 * n_embd, n_embd)
 
-    def __call__(self, x):
+    def __call__(self, x: Tensor) -> Tensor:
         return self.fc2(self.fc1(x).relu())
 
 
@@ -100,13 +98,17 @@ class Block(Module):
     Pre-LN is more stable during training compared to original Post-LN.
     """
 
-    def __init__(self, n_embd, n_head):
+    def __init__(self, n_embd: int, n_head: int) -> None:
         self.attn = CausalSelfAttention(n_embd, n_head)
         self.mlp = MLP(n_embd)
         self.ln1 = RMSNorm(n_embd)
         self.ln2 = RMSNorm(n_embd)
 
-    def __call__(self, x, kv_cache=None):
+    def __call__(
+        self,
+        x: Tensor,
+        kv_cache: tuple[Tensor, Tensor] | None = None,
+    ) -> tuple[Tensor, tuple[Tensor, Tensor] | None]:
         """
         Args:
             x: input tensor (B, T, C)
@@ -128,20 +130,26 @@ class GPT(Module):
     final normalization, and language modeling head.
     """
 
-    def __init__(self, vocab_size, block_size, n_layer=1, n_embd=16, n_head=4):
-        self.block_size = block_size
-        # Token embedding: maps token IDs to vectors
+    def __init__(
+        self,
+        vocab_size: int,
+        block_size: int,
+        n_layer: int = 1,
+        n_embd: int = 16,
+        n_head: int = 4,
+    ) -> None:
+        self.block_size: int = block_size
         self.wte = Embedding(vocab_size, n_embd)
-        # Positional embedding: encodes position information
         self.wpe = Embedding(block_size, n_embd)
-        # Stacked Transformer blocks
-        self.blocks = [Block(n_embd, n_head) for _ in range(n_layer)]
-        # Final layer normalization
+        self.blocks: list[Block] = [Block(n_embd, n_head) for _ in range(n_layer)]
         self.ln_f = RMSNorm(n_embd)
-        # Language modeling head (projects to vocab logits)
         self.lm_head = Linear(n_embd, vocab_size)
 
-    def __call__(self, idx, kv_caches=None):
+    def __call__(
+        self,
+        idx: np.ndarray,
+        kv_caches: list[tuple[Tensor, Tensor]] | None = None,
+    ) -> tuple[Tensor, list[tuple[Tensor, Tensor] | None]]:
         """
         Forward pass.
 
@@ -155,23 +163,19 @@ class GPT(Module):
         """
         B, T = idx.shape
 
-        # Compute position offsets: if cache exists, start from past length
         past_len = kv_caches[0][0].data.shape[2] if kv_caches is not None else 0
         pos = np.arange(past_len, past_len + T, dtype=int)
 
-        # Token embeddings + positional embeddings
         tok_emb = self.wte(idx)
         pos_emb = self.wpe(pos)
         x = tok_emb + pos_emb
 
-        # Pass through Transformer blocks
-        new_caches = []
+        new_caches: list[tuple[Tensor, Tensor] | None] = []
         for i, block in enumerate(self.blocks):
             layer_cache = kv_caches[i] if kv_caches is not None else None
             x, new_cache = block(x, layer_cache)
             new_caches.append(new_cache)
 
-        # Final normalization and projection to vocabulary
         x = self.ln_f(x)
         logits = self.lm_head(x)
 

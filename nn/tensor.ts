@@ -261,9 +261,18 @@ export class Tensor {
 
   // Static helpers
   private static broadcast(a: Tensor, b: Tensor, shape: number[]): Tensor {
-    const data = shape[0] === a.data.length ? a.data : a.data;
-    const bdata = shape[0] === b.data.length ? b.data : b.data;
-    return new Tensor(data, [a, b]);
+    const result: number[][] = [];
+    for (let i = 0; i < shape[0]; i++) {
+      result.push(new Array(shape[1]).fill(0));
+    }
+    for (let i = 0; i < shape[0]; i++) {
+      for (let j = 0; j < shape[1]; j++) {
+        const a_val = a.data[i % a.data.length]?.[j % (a.data[0]?.length ?? 1)] ?? 0;
+        const b_val = b.data[i % b.data.length]?.[j % (b.data[0]?.length ?? 1)] ?? 0;
+        result[i][j] = a_val + b_val;
+      }
+    }
+    return new Tensor(result, [a, b]);
   }
 
   // Make from nested arrays
