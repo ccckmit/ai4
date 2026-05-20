@@ -8,7 +8,7 @@ GPT: full language model
 
 import numpy as np
 from .tensor import Tensor, cat
-from .optim import Module, Linear, Embedding, RMSNorm
+from .nn import Module, Linear, Embedding, RMSNorm
 
 
 class CausalSelfAttention(Module):

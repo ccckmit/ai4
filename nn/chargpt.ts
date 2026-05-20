@@ -1,6 +1,6 @@
 import { Tensor } from './tensor';
 import { GPT } from './gpt';
-import { Adam } from './optim';
+import { Adam } from './nn';
 
 export function train_model(
   model: GPT,

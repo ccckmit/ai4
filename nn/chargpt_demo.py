@@ -1,7 +1,7 @@
 import os
 import random
 import numpy as np
-from .optim import Adam
+from .nn import Adam
 from .chargpt import train_model, generate_samples, GPT
 
 def main():

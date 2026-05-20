@@ -1,0 +1,628 @@
+"""
+Tensor with automatic differentiation (autograd) based on pure Python.
+Records operation history to support backpropagation through a computation graph.
+"""
+
+import math
+import operator
+
+# =====================================================================
+# [純 Python 數學後端 - 取代 NumPy 的核心實作]
+# =====================================================================
+
+def _prod(iterable):
+    p = 1
+    for n in iterable: p *= n
+    return p
+
+def _broadcast_shape(s1, s2):
+    if s1 == s2: return s1
+    res = []
+    max_len = max(len(s1), len(s2))
+    pad1 = (1,) * (max_len - len(s1)) + s1
+    pad2 = (1,) * (max_len - len(s2)) + s2
+    for d1, d2 in zip(pad1, pad2):
+        if d1 != d2 and d1 != 1 and d2 != 1:
+            raise ValueError(f"Incompatible shapes for broadcasting: {s1} and {s2}")
+        res.append(max(d1, d2))
+    return tuple(res)
+
+def _unravel_index(index, shape):
+    res = []
+    for dim in reversed(shape):
+        res.append(index % dim)
+        index //= dim
+    return tuple(reversed(res))
+
+def _ravel_index(indices, shape):
+    idx = 0
+    stride = 1
+    for i, dim in zip(reversed(indices), reversed(shape)):
+        idx += i * stride
+        stride *= dim
+    return idx
+
+def _broadcast_index(out_idx, target_shape):
+    pad_len = len(out_idx) - len(target_shape)
+    res = []
+    for i, dim in enumerate(target_shape):
+        res.append(0 if dim == 1 else out_idx[pad_len + i])
+    return tuple(res)
+
+class NDArray:
+    def __init__(self, data, shape=None):
+        if isinstance(data, NDArray):
+            self.data = data.data[:]
+            self.shape = data.shape
+        elif shape is not None:
+            self.data = list(data)
+            self.shape = tuple(shape)
+        elif isinstance(data, (int, float)):
+            self.data = [float(data)]
+            self.shape = ()
+        else:
+            self.shape, self.data = self._flatten(data)
+
+    def _flatten(self, lst):
+        if not isinstance(lst, (list, tuple)):
+            return (), [float(lst)]
+        if not lst:
+            return (0,), []
+        inner_shape, _ = self._flatten(lst[0])
+        shape = (len(lst),) + inner_shape
+        data = []
+        for item in lst:
+            _, idata = self._flatten(item)
+            data.extend(idata)
+        return shape, data
+
+    @property
+    def ndim(self): return len(self.shape)
+    
+    @property
+    def size(self): return _prod(self.shape)
+
+    def copy(self):
+        return NDArray(self.data[:], self.shape)
+
+    def __getitem__(self, key):
+        if isinstance(key, tuple) and all(isinstance(k, int) for k in key):
+            idx = _ravel_index(key, self.shape)
+            return self.data[idx]
+        raise NotImplementedError("Only single-element tuple indexing is supported in Mock.")
+
+    def __setitem__(self, key, value):
+        if isinstance(key, tuple) and all(isinstance(k, int) for k in key):
+            idx = _ravel_index(key, self.shape)
+            self.data[idx] = float(value)
+            return
+        raise NotImplementedError("Only single-element tuple indexing is supported in Mock.")
+
+    def __add__(self, other): return _ew_op(self, other, operator.add)
+    def __sub__(self, other): return _ew_op(self, other, operator.sub)
+    def __mul__(self, other): return _ew_op(self, other, operator.mul)
+    def __truediv__(self, other): return _ew_op(self, other, operator.truediv)
+    def __pow__(self, power): return _ew_op(self, power, operator.pow)
+    def __radd__(self, other): return _ew_op(other, self, operator.add)
+    def __rsub__(self, other): return _ew_op(other, self, operator.sub)
+    def __rmul__(self, other): return _ew_op(other, self, operator.mul)
+
+    def __gt__(self, other): return _ew_op(self, other, lambda x, y: 1.0 if x > y else 0.0)
+    def __ge__(self, other): return _ew_op(self, other, lambda x, y: 1.0 if x >= y else 0.0)
+    def __lt__(self, other): return _ew_op(self, other, lambda x, y: 1.0 if x < y else 0.0)
+    def __le__(self, other): return _ew_op(self, other, lambda x, y: 1.0 if x <= y else 0.0)
+    def __eq__(self, other): return _ew_op(self, other, lambda x, y: 1.0 if x == y else 0.0)
+    def __and__(self, other): return _ew_op(self, other, lambda x, y: 1.0 if bool(x) and bool(y) else 0.0)
+    
+    def __matmul__(self, other): return _matmul(self, other)
+
+    def sum(self, axis=None, keepdims=False):
+        return _reduce_op(self, axis, keepdims, 0.0, operator.add)
+
+    def mean(self, axis=None, keepdims=False):
+        return _reduce_op(self, axis, keepdims, 0.0, operator.add, lambda v, cnt: v / cnt)
+
+    def reshape(self, *shape):
+        shape = list(shape)
+        if -1 in shape:
+            prod_others = -_prod([s for s in shape if s != -1])
+            shape[shape.index(-1)] = self.size // prod_others
+        return NDArray(self.data, tuple(shape))
+    
+    def __repr__(self):
+        return f"NDArray(shape={self.shape})"
+
+def _ew_op(a, b, op):
+    a = a if isinstance(a, NDArray) else NDArray(a)
+    b = b if isinstance(b, NDArray) else NDArray(b)
+    out_shape = _broadcast_shape(a.shape, b.shape)
+    out_size = _prod(out_shape)
+    out_data = [0.0] * out_size
+    for i in range(out_size):
+        idx = _unravel_index(i, out_shape)
+        ia = _ravel_index(_broadcast_index(idx, a.shape), a.shape)
+        ib = _ravel_index(_broadcast_index(idx, b.shape), b.shape)
+        out_data[i] = op(a.data[ia], b.data[ib])
+    return NDArray(out_data, out_shape)
+
+def _unary_op(a, op):
+    return NDArray([op(x) for x in a.data], a.shape)
+
+def _reduce_op(a, axis, keepdims, op_init, op_func, post_func=None):
+    if axis is None:
+        val = op_init
+        for x in a.data: val = op_func(val, x)
+        if post_func: val = post_func(val, len(a.data))
+        return NDArray([val], (1,) if keepdims else ())
+
+    if isinstance(axis, int): axis = (axis,)
+    axis = tuple((d % len(a.shape)) for d in axis)
+
+    out_shape = tuple(1 if i in axis else s for i, s in enumerate(a.shape))
+    out_size = _prod(out_shape)
+    out_data = [op_init] * out_size
+    counts = [0] * out_size
+
+    for i in range(len(a.data)):
+        idx = _unravel_index(i, a.shape)
+        out_idx = tuple(0 if dim in axis else idx[dim] for dim in range(len(a.shape)))
+        flat_out_idx = _ravel_index(out_idx, out_shape)
+        out_data[flat_out_idx] = op_func(out_data[flat_out_idx], a.data[i])
+        counts[flat_out_idx] += 1
+
+    if post_func:
+        for i in range(out_size): out_data[i] = post_func(out_data[i], counts[i])
+    if not keepdims:
+        out_shape = tuple(s for i, s in enumerate(a.shape) if i not in axis)
+    return NDArray(out_data, out_shape)
+
+def _matmul(a, b):
+    a = a if isinstance(a, NDArray) else NDArray(a)
+    b = b if isinstance(b, NDArray) else NDArray(b)
+    is_1d_a, is_1d_b = len(a.shape) == 1, len(b.shape) == 1
+    shape_a = (1,) + a.shape if is_1d_a else a.shape
+    shape_b = b.shape + (1,) if is_1d_b else b.shape
+
+    *batch_a, M, K = shape_a
+    *batch_b, K2, N = shape_b
+    if K != K2: raise ValueError("Matmul shape mismatch")
+
+    batch_out = _broadcast_shape(tuple(batch_a), tuple(batch_b))
+    out_shape = batch_out + (M, N)
+    out_size = _prod(out_shape)
+    out_data = [0.0] * out_size
+
+    for i in range(out_size):
+        out_idx = _unravel_index(i, out_shape)
+        batch_idx, r, c = out_idx[:-2], out_idx[-2], out_idx[-1]
+        b_idx_a = _broadcast_index(batch_idx, tuple(batch_a))
+        b_idx_b = _broadcast_index(batch_idx, tuple(batch_b))
+        
+        val = 0.0
+        for k in range(K):
+            ia = _ravel_index(b_idx_a + (r, k), shape_a)
+            ib = _ravel_index(b_idx_b + (k, c), shape_b)
+            val += a.data[ia] * b.data[ib]
+        out_data[i] = val
+
+    final_shape = list(out_shape)
+    if is_1d_b: final_shape.pop(-1)
+    if is_1d_a: final_shape.pop(len(batch_out))
+    return NDArray(out_data, tuple(final_shape))
+
+class MockNumPy:
+    float32, int64 = "float32", "int64"
+    
+    def array(self, data, dtype=None): return NDArray(data)
+    def asarray(self, data, dtype=None): return NDArray(data)
+    def zeros_like(self, a, dtype=None): return NDArray([0.0] * a.size, a.shape)
+    def ones_like(self, a, dtype=None): return NDArray([1.0] * a.size, a.shape)
+    
+    def swapaxes(self, a, ax1, ax2):
+        ndim = len(a.shape)
+        ax1, ax2 = ax1 % ndim, ax2 % ndim
+        out_shape = list(a.shape)
+        out_shape[ax1], out_shape[ax2] = out_shape[ax2], out_shape[ax1]
+        out_shape = tuple(out_shape)
+        out_data = [0.0] * len(a.data)
+        for i in range(len(a.data)):
+            idx = list(_unravel_index(i, a.shape))
+            idx[ax1], idx[ax2] = idx[ax2], idx[ax1]
+            out_idx = _ravel_index(tuple(idx), out_shape)
+            out_data[out_idx] = a.data[i]
+        return NDArray(out_data, out_shape)
+
+    def maximum(self, val, a): return _ew_op(val, a, max)
+    def tanh(self, a): return _unary_op(a, math.tanh)
+    def abs(self, a): return _unary_op(a, abs)
+    def sign(self, a): return _unary_op(a, lambda x: 1.0 if x > 0 else (-1.0 if x < 0 else 0.0))
+    def exp(self, a): return _unary_op(a, math.exp)
+    def log(self, a): return math.log(a) if isinstance(a, (int, float)) else _unary_op(a, math.log)
+    
+    def clip(self, a, min_val, max_val):
+        def _clip(x):
+            if min_val is not None: x = max(min_val, x)
+            if max_val is not None: x = min(max_val, x)
+            return x
+        return _unary_op(a, _clip)
+
+    def where(self, mask, a, b):
+        mask = mask if isinstance(mask, NDArray) else NDArray(mask)
+        a, b = (a if isinstance(a, NDArray) else NDArray(a)), (b if isinstance(b, NDArray) else NDArray(b))
+        out_shape = _broadcast_shape(_broadcast_shape(mask.shape, a.shape), b.shape)
+        out_size = _prod(out_shape)
+        out_data = [0.0] * out_size
+        for i in range(out_size):
+            idx = _unravel_index(i, out_shape)
+            im = _ravel_index(_broadcast_index(idx, mask.shape), mask.shape)
+            ia = _ravel_index(_broadcast_index(idx, a.shape), a.shape)
+            ib = _ravel_index(_broadcast_index(idx, b.shape), b.shape)
+            out_data[i] = a.data[ia] if mask.data[im] else b.data[ib]
+        return NDArray(out_data, out_shape)
+
+    def max(self, a, axis=None, keepdims=False):
+        return _reduce_op(a, axis, keepdims, -float('inf'), max)
+
+    def sum(self, a, axis=None, keepdims=False): return a.sum(axis=axis, keepdims=keepdims)
+
+    def expand_dims(self, a, axis):
+        shape = list(a.shape)
+        shape.insert(axis % (len(shape) + 1), 1)
+        return NDArray(a.data[:], tuple(shape))
+
+    def broadcast_to(self, a, shape):
+        out_shape = tuple(shape)
+        out_size = _prod(out_shape)
+        out_data = [0.0] * out_size
+        for i in range(out_size):
+            idx = _unravel_index(i, out_shape)
+            ia = _ravel_index(_broadcast_index(idx, a.shape), a.shape)
+            out_data[i] = a.data[ia]
+        return NDArray(out_data, out_shape)
+
+    def concatenate(self, arrays, axis=0):
+        if not arrays: return NDArray([])
+        axis = axis % len(arrays[0].shape)
+        out_shape = list(arrays[0].shape)
+        out_shape[axis] = sum(a.shape[axis] for a in arrays)
+        out_shape = tuple(out_shape)
+        out_size = _prod(out_shape)
+        out_data = [0.0] * out_size
+        for i in range(out_size):
+            out_idx = list(_unravel_index(i, out_shape))
+            dim_val, offset = out_idx[axis], 0
+            for arr in arrays:
+                if dim_val < offset + arr.shape[axis]:
+                    out_idx[axis] = dim_val - offset
+                    ia = _ravel_index(tuple(out_idx), arr.shape)
+                    out_data[i] = arr.data[ia]
+                    break
+                offset += arr.shape[axis]
+        return NDArray(out_data, out_shape)
+
+    def split(self, a, indices, axis=0):
+        axis = axis % len(a.shape)
+        indices = [0] + list(indices) + [a.shape[axis]]
+        splits = []
+        for i in range(len(indices) - 1):
+            start, end = indices[i], indices[i+1]
+            size = end - start
+            out_shape = list(a.shape)
+            out_shape[axis] = size
+            out_shape = tuple(out_shape)
+            out_data = [0.0] * _prod(out_shape)
+            for j in range(len(out_data)):
+                idx = list(_unravel_index(j, out_shape))
+                idx[axis] += start
+                ia = _ravel_index(tuple(idx), a.shape)
+                out_data[j] = a.data[ia]
+            splits.append(NDArray(out_data, out_shape))
+        return splits
+
+    def cumsum(self, arr):
+        res, s = [], 0
+        for x in arr:
+            s += x
+            res.append(s)
+        return res # 回傳 List 以利原有語法 [:-1] 的切片操作
+
+np = MockNumPy()
+
+# =====================================================================
+# [原有的 Tensor 程式碼 - 自動微分機制]
+# =====================================================================
+
+def unbroadcast(grad, shape):
+    """
+    Restores broadcast gradients to their original shape.
+    When broadcasting expands dimensions, gradients must be summed over
+    those dimensions during backpropagation.
+    """
+    if grad.shape == shape:
+        return grad
+    ndim_diff = grad.ndim - len(shape)
+    if ndim_diff > 0:
+        grad = grad.sum(axis=tuple(range(ndim_diff)))
+    for i, dim in enumerate(shape):
+        if dim == 1 and grad.shape[i] > 1:
+            grad = grad.sum(axis=i, keepdims=True)
+    return grad
+
+
+class Tensor:
+    """
+    Pure-Python-based tensor with autograd.
+    Tracks computation history for backpropagation.
+    """
+
+    def __init__(self, data, _children=(), requires_grad=False):
+        self.data = np.array(data, dtype=np.float32)
+        self.grad = np.zeros_like(self.data)
+        self._backward = lambda: None
+        self._prev = set(_children)
+        self.requires_grad = requires_grad
+
+    @property
+    def shape(self):
+        """Returns the shape of the underlying NDArray."""
+        return self.data.shape
+
+    def zero_grad(self):
+        """Resets gradients to zeros."""
+        self.grad = np.zeros_like(self.data)
+
+    def backward(self):
+        """
+        Runs backpropagation from this tensor.
+        Uses topological sort to process nodes in correct order.
+        Initializes gradient of this tensor to ones (dL/dL = 1).
+        """
+        topo = []
+        visited = set()
+
+        def build_topo(v):
+            if v not in visited:
+                visited.add(v)
+                for child in v._prev:
+                    build_topo(child)
+                topo.append(v)
+
+        build_topo(self)
+
+        self.grad = np.ones_like(self.data)
+        for v in reversed(topo):
+            v._backward()
+
+    # --- Basic arithmetic ---
+
+    def __add__(self, other):
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        out = Tensor(self.data + other.data, (self, other), self.requires_grad or other.requires_grad)
+
+        def _backward():
+            self.grad += unbroadcast(out.grad, self.data.shape)
+            other.grad += unbroadcast(out.grad, other.data.shape)
+
+        out._backward = _backward
+        return out
+
+    def __mul__(self, other):
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        out = Tensor(self.data * other.data, (self, other), self.requires_grad or other.requires_grad)
+
+        def _backward():
+            self.grad += unbroadcast(out.grad * other.data, self.data.shape)
+            other.grad += unbroadcast(out.grad * self.data, other.data.shape)
+
+        out._backward = _backward
+        return out
+
+    def __matmul__(self, other):
+        other = other if isinstance(other, Tensor) else Tensor(other)
+        out = Tensor(self.data @ other.data, (self, other), self.requires_grad or other.requires_grad)
+
+        def _backward():
+            self.grad += unbroadcast(out.grad @ np.swapaxes(other.data, -1, -2), self.data.shape)
+            other.grad += unbroadcast(np.swapaxes(self.data, -1, -2) @ out.grad, other.data.shape)
+
+        out._backward = _backward
+        return out
+
+    # --- Shape operations ---
+
+    def transpose(self, ax1, ax2):
+        """Swaps two axes. Gradient: swap the gradient axes back."""
+        out = Tensor(np.swapaxes(self.data, ax1, ax2), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += np.swapaxes(out.grad, ax1, ax2)
+
+        out._backward = _backward
+        return out
+
+    def reshape(self, *shape):
+        """Reshapes tensor. Gradient: reshape gradient back to original shape."""
+        out = Tensor(self.data.reshape(*shape), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad.reshape(*self.data.shape)
+
+        out._backward = _backward
+        return out
+
+    # --- Activation / nonlinear functions ---
+
+    def relu(self):
+        """ReLU: max(0, x). Gradient is 1 where input > 0, else 0."""
+        out = Tensor(np.maximum(0, self.data), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad * (self.data > 0)
+
+        out._backward = _backward
+        return out
+
+    def tanh(self):
+        """Tanh: (exp(x) - exp(-x)) / (exp(x) + exp(-x))"""
+        out = Tensor(np.tanh(self.data), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad * (1 - out.data ** 2)
+
+        out._backward = _backward
+        return out
+
+    def clamp(self, min_val=None, max_val=None):
+        out = Tensor(np.clip(self.data, min_val, max_val), (self,), self.requires_grad)
+
+        def _backward():
+            mask = np.ones_like(self.data, dtype=bool)
+            if min_val is not None:
+                mask &= (self.data >= min_val)
+            if max_val is not None:
+                mask &= (self.data <= max_val)
+            self.grad += out.grad * mask
+
+        out._backward = _backward
+        return out
+
+    def abs(self):
+        """Absolute value."""
+        out = Tensor(np.abs(self.data), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad * np.sign(self.data)
+
+        out._backward = _backward
+        return out
+
+    def masked_fill(self, mask, value):
+        """Replaces values where mask is True with value. Gradient: mask out gradient at True positions."""
+        out_data = np.where(mask, value, self.data)
+        out = Tensor(out_data, (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += np.where(mask, 0, out.grad)
+
+        out._backward = _backward
+        return out
+
+    def softmax(self, axis=-1):
+        """
+        Softmax along given axis.
+        """
+        max_val = np.max(self.data, axis=axis, keepdims=True)
+        exps = np.exp(self.data - max_val)
+        probs = exps / np.sum(exps, axis=axis, keepdims=True)
+        out = Tensor(probs, (self,), self.requires_grad)
+
+        def _backward():
+            s = out.data
+            grad_s = out.grad
+            self.grad += s * (grad_s - np.sum(grad_s * s, axis=axis, keepdims=True))
+
+        out._backward = _backward
+        return out
+
+    def cross_entropy(self, targets):
+        """
+        Cross-entropy loss for classification.
+        targets: integer labels of shape (batch, seq_len)
+        """
+        targets_data = np.asarray(targets.data if isinstance(targets, Tensor) else targets, dtype=np.int64)
+        logits = self.data
+        max_logits = np.max(logits, axis=-1, keepdims=True)
+        exps = np.exp(logits - max_logits)
+        probs = exps / np.sum(exps, axis=-1, keepdims=True)
+
+        batch_size, seq_len = targets_data.shape
+        loss = 0.0
+        for b in range(batch_size):
+            for t in range(seq_len):
+                loss -= np.log(probs[b, t, int(targets_data[b, t])] + 1e-10)
+        loss = loss / (batch_size * seq_len)
+
+        out = Tensor(loss, (self,), self.requires_grad)
+
+        def _backward():
+            d_logits = probs.copy()
+            for b in range(batch_size):
+                for t in range(seq_len):
+                    d_logits[b, t, int(targets_data[b, t])] -= 1
+            d_logits = d_logits / (batch_size * seq_len)
+            self.grad += out.grad * d_logits
+
+        out._backward = _backward
+        return out
+
+    # Python Magic Methods
+
+    def __sub__(self, other): return self + (other * -1)
+    def __truediv__(self, other): return self * (other ** -1)
+    def __radd__(self, other): return self + other
+    def __rmul__(self, other): return self * other
+
+    def __pow__(self, power):
+        out = Tensor(self.data ** power, (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad * (power * self.data ** (power - 1))
+
+        out._backward = _backward
+        return out
+
+    def sum(self, axis=None, keepdims=False):
+        """Sum over specified axis. Gradient: broadcast gradient back."""
+        out = Tensor(self.data.sum(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
+
+        def _backward():
+            grad = out.grad
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+            self.grad += np.broadcast_to(grad, self.data.shape)
+
+        out._backward = _backward
+        return out
+
+    def mean(self, axis=None, keepdims=False):
+        """Mean over specified axis."""
+        out = Tensor(self.data.mean(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
+
+        def _backward():
+            grad = out.grad
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+            if axis is None:
+                n = self.data.size
+            else:
+                n = self.data.shape[axis] if isinstance(axis, int) else _prod([self.data.shape[a] for a in axis])
+            self.grad += np.broadcast_to(grad, self.data.shape) / n
+
+        out._backward = _backward
+        return out
+
+    def __neg__(self):
+        return self * -1
+
+
+def cat(tensors, axis=0):
+    """
+    Concatenates tensors along given axis.
+    Backward: splits gradient along concatenation axis, distributes to original tensors.
+    Used for KV Cache concatenation in Transformer attention.
+    """
+    data = np.concatenate([t.data for t in tensors], axis=axis)
+    requires_grad = any(t.requires_grad for t in tensors)
+    out = Tensor(data, tuple(tensors), requires_grad)
+
+    def _backward():
+        if not out.requires_grad:
+            return
+        split_sizes = [t.data.shape[axis] for t in tensors]
+        grads = np.split(out.grad, np.cumsum(split_sizes)[:-1], axis=axis)
+        for t, g in zip(tensors, grads):
+            if t.requires_grad:
+                t.grad += g
+
+    out._backward = _backward
+    return out

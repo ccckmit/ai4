@@ -1,5 +1,5 @@
 export * from './tensor';
-export * from './optim';
+export * from './nn';
 export * from './gpt';
 export { GPT } from './gpt';
 export { Tensor, cat } from './tensor';

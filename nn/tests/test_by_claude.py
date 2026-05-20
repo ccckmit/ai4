@@ -9,7 +9,7 @@ import pytest
 import numpy as np
 
 from nn.tensor import Tensor, cat
-from nn.optim import (
+from nn.nn import (
     mse_loss, Linear, Embedding, RMSNorm, Adam,
     Sequential, ReLU, Tanh, Module,
 )

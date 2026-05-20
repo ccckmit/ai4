@@ -1,0 +1,198 @@
+import { Tensor, cat, NDArray } from './tensor';
+
+export function mseLoss(input: Tensor, target: Tensor): Tensor {
+  const diff = input.sub(target);
+  const outData = diff.data.getAll().reduce((acc, v) => acc + v * v, 0) / diff.data.size;
+  const out = new Tensor(outData, [input, target], input.requires_grad || target.requires_grad);
+
+  out._backward = () => {
+    const N = diff.data.size;
+    const gradVal = 2 * out.grad.getAll()[0] / N;
+    input.grad = input.grad.add(diff.mul(gradVal));
+    target.grad = target.grad.add(diff.mul(-gradVal));
+  };
+  return out;
+}
+
+export class Module {
+  parameters(): Tensor[] {
+    const params: Tensor[] = [];
+    for (const v of Object.values(this)) {
+      if (v instanceof Tensor && v.requires_grad) {
+        params.push(v);
+      } else if (v instanceof Module) {
+        params.push(...v.parameters());
+      } else if (Array.isArray(v) || (v && typeof v === 'object' && Symbol.iterator in v)) {
+        for (const item of v as Iterable<any>) {
+          if (item instanceof Module) {
+            params.push(...item.parameters());
+          }
+        }
+      }
+    }
+    return params;
+  }
+}
+
+export class Sequential extends Module {
+  modules: Module[];
+
+  constructor(...modules: Module[]) {
+    super();
+    this.modules = modules;
+  }
+
+  call(x: Tensor): Tensor {
+    for (const m of this.modules) {
+      x = (m as any)(x);
+    }
+    return x;
+  }
+}
+
+export class ReLU extends Module {
+  call(x: Tensor): Tensor { return x.relu(); }
+}
+
+export class Tanh extends Module {
+  call(x: Tensor): Tensor { return x.tanh(); }
+}
+
+export class Linear extends Module {
+  weight: Tensor;
+  bias: Tensor | null;
+
+  constructor(inFeatures: number, outFeatures: number, bias = false) {
+    super();
+    const std = 0.08;
+    const shapeW: [number, number] = [inFeatures, outFeatures];
+    this.weight = new Tensor(
+      Array.from({length: inFeatures * outFeatures}, () => (Math.random() - 0.5) * 2 * std),
+      [], true
+    ).reshape(...shapeW);
+    this.bias = bias ? new Tensor(Array(outFeatures).fill(0), [], true) : null;
+  }
+
+  call(x: Tensor): Tensor {
+    let out = x.matmul(this.weight);
+    if (this.bias !== null) out = out.add(this.bias);
+    return out;
+  }
+  forward(x: Tensor): Tensor { return this.call(x); }
+}
+
+export class Embedding extends Module {
+  weight: Tensor;
+
+  constructor(numEmbeddings: number, embeddingDim: number) {
+    super();
+    this.weight = new Tensor(
+      Array.from({length: numEmbeddings * embeddingDim}, () => (Math.random() - 0.5) * 2 * 0.08),
+      [], true
+    ).reshape(numEmbeddings, embeddingDim);
+  }
+
+  call(indices: Tensor): Tensor {
+    const idx = indices.data.getAll().map(v => Math.floor(v));
+    const [numEmbeddings, embeddingDim] = this.weight.shape;
+    const outData: number[] = [];
+    for (const i of idx) {
+      for (let d = 0; d < embeddingDim; d++) {
+        outData.push(this.weight.data.get(i, d));
+      }
+    }
+    const outShape = [idx.length, embeddingDim];
+    const out = new Tensor(outData, [this.weight], true).reshape(...outShape);
+
+    out._backward = () => {
+      const grad = out.grad;
+      for (let j = 0; j < idx.length; j++) {
+        for (let d = 0; d < embeddingDim; d++) {
+          const wIdx = idx[j] * embeddingDim + d;
+          this.weight.data.data[wIdx] += grad.get(j, d);
+        }
+      }
+    };
+    return out;
+  }
+  forward(indices: Tensor): Tensor { return this.call(indices); }
+}
+
+export class RMSNorm extends Module {
+  eps: number;
+  scale: Tensor;
+
+  constructor(dim: number, eps = 1e-5) {
+    super();
+    this.eps = eps;
+    this.scale = new Tensor(Array(dim).fill(1), [], false);
+  }
+
+  call(x: Tensor): Tensor {
+    const ms = x.data.getAll().reduce((acc, v) => acc + v * v, 0) / x.data.size + this.eps;
+    const invStd = 1 / Math.sqrt(ms);
+    const outData = x.data.getAll().map(v => v * invStd);
+    const out = new Tensor(outData, [x], x.requires_grad).reshape(...x.shape);
+
+    out._backward = () => {
+      const N = x.data.shape[x.data.shape.length - 1];
+      const outGradData = out.grad.getAll();
+      const xData = x.data.getAll();
+      const sumGx = outGradData.reduce((s, g, i) => s + g * xData[i], 0) / N;
+      const dx = xData.map((v, i) => {
+        const g = outGradData[i];
+        return g * invStd - v * Math.pow(invStd, 3) * sumGx;
+      });
+      const gradData: number[] = x.grad.data as any;
+      for (let i = 0; i < gradData.length; i++) {
+        gradData[i] += dx[i];
+      }
+    };
+    return out;
+  }
+  forward(x: Tensor): Tensor { return this.call(x); }
+}
+
+export class Adam extends Module {
+  params: Tensor[];
+  lr: number;
+  beta1: number;
+  beta2: number;
+  eps: number;
+  m: number[][];
+  v: number[][];
+  t: number;
+
+  constructor(params: Tensor[], lr = 0.01, betas: [number, number] = [0.85, 0.99], eps = 1e-8) {
+    super();
+    this.params = params;
+    this.lr = lr;
+    this.beta1 = betas[0];
+    this.beta2 = betas[1];
+    this.eps = eps;
+    this.m = params.map(p => p.data.getAll().map(() => 0));
+    this.v = params.map(p => p.data.getAll().map(() => 0));
+    this.t = 0;
+  }
+
+  step(): void {
+    this.t++;
+    for (let i = 0; i < this.params.length; i++) {
+      const p = this.params[i];
+      const grad = p.grad.getAll();
+      const pData = p.data.getAll();
+
+      this.m[i] = this.m[i].map((mv, j) => this.beta1 * mv + (1 - this.beta1) * grad[j]);
+      this.v[i] = this.v[i].map((vv, j) => this.beta2 * vv + (1 - this.beta2) * grad[j] * grad[j]);
+
+      const mHat = this.m[i].map(mv => mv / (1 - Math.pow(this.beta1, this.t)));
+      const vHat = this.v[i].map(vv => vv / (1 - Math.pow(this.beta2, this.t)));
+
+      p.data = new NDArray(pData.map((pv, j) => pv - this.lr * mHat[j] / (Math.sqrt(vHat[j]) + this.eps))).reshape(...p.shape);
+    }
+  }
+
+  zeroGrad(): void {
+    for (const p of this.params) p.zeroGrad();
+  }
+}

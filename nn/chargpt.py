@@ -1,6 +1,6 @@
 import numpy as np
 from .tensor import Tensor
-from .optim import Adam
+from .nn import Adam
 from .gpt import GPT
 
 """

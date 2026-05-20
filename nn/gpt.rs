@@ -2,7 +2,7 @@
 //! GPT language model implementation with KV Cache support.
 
 use super::tensor::Tensor;
-use super::optim::{Module, Linear, Embedding, RMSNorm};
+use super::nn::{Module, Linear, Embedding, RMSNorm};
 
 pub struct CausalSelfAttention {
     pub wq: Linear,

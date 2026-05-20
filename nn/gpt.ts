@@ -1,5 +1,5 @@
 import { Tensor } from './tensor';
-import { Module, Linear, Embedding, RMSNorm } from './optim';
+import { Module, Linear, Embedding, RMSNorm } from './nn';
 
 export class CausalSelfAttention extends Module {
   q: Linear;
@@ -34,9 +34,9 @@ export class CausalSelfAttention extends Module {
 
     for (let b = 0; b < B; b++) {
       for (let t = 0; t < seq_len; t++) {
-        const q_row = (q.data[b] ?? []).slice(t * this.n_head, (t + 1) * this.n_head);
-        const k_row = (k.data[b] ?? []).slice(t * this.n_head, (t + 1) * this.n_head);
-        const v_row = (v.data[b] ?? []).slice(t * this.n_head, (t + 1) * this.n_head);
+        const q_row = (q.data[b]?._data ?? []).slice(t * this.n_head, (t + 1) * this.n_head);
+        const k_row = (k.data[b]?._data ?? []).slice(t * this.n_head, (t + 1) * this.n_head);
+        const v_row = (v.data[b]?._data ?? []).slice(t * this.n_head, (t + 1) * this.n_head);
         q_data.push(q_row);
         k_data.push(k_row);
         v_data.push(v_row);

@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { Tensor } from './tensor';
-import { Adam } from './optim';
+import { Adam } from './nn';
 import { GPT } from './gpt';
 import { train_model, generate_samples } from './chargpt';
 
