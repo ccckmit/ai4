@@ -4,7 +4,10 @@
 use super::tensor::Tensor;
 
 pub trait Module {
-    fn parameters(&self) -> Vec<&Tensor>;
+    fn forward(&self, x: &Tensor) -> Tensor;
+    fn parameters(&self) -> Vec<&Tensor> {
+        vec![]
+    }
 }
 
 pub struct Linear {
@@ -73,6 +76,10 @@ impl Linear {
 }
 
 impl Module for Linear {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        Self::new(self.weight.shape[0], self.weight.shape[1], self.bias.is_some()).forward(x)
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         let mut params = vec![&self.weight];
         if let Some(ref b) = self.bias {
@@ -100,7 +107,7 @@ impl Embedding {
         Embedding { weight }
     }
 
-    pub fn forward(&self, indices: &[usize]) -> Tensor {
+    pub fn embed(&self, indices: &[usize]) -> Tensor {
         let batch_size = indices.len();
         let embedding_dim = self.weight.shape[1];
         
@@ -119,6 +126,11 @@ impl Embedding {
 }
 
 impl Module for Embedding {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        let indices: Vec<usize> = x.data.borrow().iter().map(|&v| v as usize).collect();
+        self.embed(&indices)
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         vec![&self.weight]
     }
@@ -138,6 +150,34 @@ impl RMSNorm {
     }
 
     pub fn forward(&self, x: &Tensor) -> Tensor {
+        let data = x.data.borrow();
+        let dim = if x.shape.len() >= 3 { x.shape[x.shape.len() - 1] } else { x.shape[x.shape.len() - 1] };
+        let batch_size = x.shape[0];
+        let seq_len = if x.shape.len() >= 3 { data.len() / (batch_size * dim) } else { 1 };
+        
+        let mut output = Vec::with_capacity(data.len());
+        
+        for b in 0..batch_size {
+            for s in 0..seq_len {
+                let offset = (b * seq_len + s) * dim;
+                if offset + dim > data.len() { break; }
+                let slice = &data[offset..offset + dim];
+                
+                let ms: f32 = slice.iter().map(|&x| x * x).sum::<f32>() / dim as f32 + self.eps;
+                let inv_std = ms.powf(-0.5);
+                
+                for &val in slice {
+                    output.push(val * inv_std);
+                }
+            }
+        }
+        
+        Tensor::new(output, x.shape.clone(), x.requires_grad)
+    }
+}
+
+impl Module for RMSNorm {
+    fn forward(&self, x: &Tensor) -> Tensor {
         let data = x.data.borrow();
         let batch_size = x.shape[0];
         let seq_len = x.shape[1];
@@ -161,9 +201,7 @@ impl RMSNorm {
         
         Tensor::new(output, x.shape.clone(), x.requires_grad)
     }
-}
 
-impl Module for RMSNorm {
     fn parameters(&self) -> Vec<&Tensor> {
         vec![&self.scale]
     }
@@ -181,7 +219,7 @@ pub struct Adam {
 }
 
 impl Adam {
-    pub fn new(params: Vec<Tensor>, lr: f32, betas: (f32, f32), eps: f32) -> Self {
+    pub fn new(params: Vec<&Tensor>, lr: f32, betas: (f32, f32), eps: f32) -> Self {
         let m: Vec<Vec<f32>> = params.iter()
             .map(|p| vec![0.0; p.data.borrow().len()])
             .collect();
@@ -190,8 +228,13 @@ impl Adam {
             .map(|p| vec![0.0; p.data.borrow().len()])
             .collect();
         
+        let mut params_owned = Vec::with_capacity(params.len());
+        for p in params.iter() {
+            params_owned.push((*p).clone());
+        }
+        
         Adam {
-            params,
+            params: params_owned,
             lr,
             beta1: betas.0,
             beta2: betas.1,
@@ -232,6 +275,10 @@ impl Adam {
 }
 
 impl Module for Adam {
+    fn forward(&self, _x: &Tensor) -> Tensor {
+        panic!("Adam optimizer does not have a forward method")
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         self.params.iter().collect()
     }

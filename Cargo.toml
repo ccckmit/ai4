@@ -12,6 +12,35 @@ categories = ["science", "mathematics"]
 [dependencies]
 rand = "0.8"
 rand_distr = "0.4"
+hex = "0.4"
 
 [lib]
 path = "lib.rs"
+
+[[bin]]
+name = "nn_example"
+path = "nn/example.rs"
+
+[[bin]]
+name = "world_frozen_lake_example"
+path = "world/examples/frozen_lake_example.rs"
+
+[[bin]]
+name = "world_frozenlake_qtable"
+path = "world/examples/frozenlake_qtable.rs"
+
+[[bin]]
+name = "world_cartpole_closed_form"
+path = "world/examples/cartpole_closed_form.rs"
+
+[[bin]]
+name = "ml_example"
+path = "ml/examples/example.rs"
+
+[[bin]]
+name = "chargpt_demo"
+path = "nn/chargpt_demo.rs"
+
+[[bin]]
+name = "mnist_train"
+path = "nn/mnist/train.rs"

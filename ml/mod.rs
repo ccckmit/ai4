@@ -8,6 +8,11 @@ pub mod decomposition;
 pub mod metrics;
 pub mod preprocessing;
 
+#[cfg(test)]
+mod tests {
+    mod test_ml;
+}
+
 pub use linear_models::{LinearRegression, LogisticRegression};
 pub use tree::DecisionTree;
 pub use ensemble::RandomForest;

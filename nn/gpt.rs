@@ -27,7 +27,7 @@ impl CausalSelfAttention {
         }
     }
 
-    pub fn forward(&self, x: &Tensor, kv_cache: Option<(&Tensor, &Tensor)>) -> (Tensor, (Tensor, Tensor)) {
+    pub fn forward_raw(&self, x: &Tensor, kv_cache: Option<(&Tensor, &Tensor)>) -> (Tensor, (Tensor, Tensor)) {
         let B = x.shape[0];
         let T = x.shape[1];
         let C = x.shape[2];
@@ -65,6 +65,11 @@ impl CausalSelfAttention {
 }
 
 impl Module for CausalSelfAttention {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        let (out, _) = self.forward_raw(x, None);
+        out
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         let mut params = self.wq.parameters();
         params.extend(self.wk.parameters());
@@ -93,6 +98,10 @@ impl MLP {
 }
 
 impl Module for MLP {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        self.fc2.forward(&self.fc1.forward(x).relu())
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         let mut params = self.fc1.parameters();
         params.extend(self.fc2.parameters());
@@ -117,9 +126,14 @@ impl Block {
         }
     }
 
-    pub fn forward(&self, x: &Tensor, kv_cache: Option<(&Tensor, &Tensor)>) -> (Tensor, (Tensor, Tensor)) {
+    pub fn forward(&self, x: &Tensor) -> Tensor {
+        let (out, _) = self.forward_raw(x, None);
+        out
+    }
+
+    pub fn forward_raw(&self, x: &Tensor, kv_cache: Option<(&Tensor, &Tensor)>) -> (Tensor, (Tensor, Tensor)) {
         let normalized = self.ln1.forward(x);
-        let (attn_out, new_cache) = self.attn.forward(&normalized, kv_cache);
+        let (attn_out, new_cache) = self.attn.forward_raw(&normalized, kv_cache);
         
         // Residual connection
         let x = x.add(&attn_out);
@@ -135,6 +149,10 @@ impl Block {
 }
 
 impl Module for Block {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        self.forward_raw(x, None).0
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         let mut params = self.attn.parameters();
         params.extend(self.mlp.parameters());
@@ -163,35 +181,40 @@ impl GPT {
         }
     }
 
-    pub fn forward(&self, idx: &[usize], kv_caches: Option<Vec<(Tensor, Tensor)>>) -> (Tensor, Vec<(Tensor, Tensor)>) {
+    pub fn forward_idx(&self, idx: &[usize], kv_caches: Option<Vec<(Tensor, Tensor)>>) -> (Tensor, Vec<(Tensor, Tensor)>) {
         let T = idx.len();
-        let B = 1;
         
         // Token embeddings
-        let tok_emb = self.wte.forward(idx);
+        let tok_emb = self.wte.embed(idx);
         
         // Simplified positional embeddings (just add zeros)
         let pos_emb_data = vec![0.0; T * self.n_embd()];
         let pos_emb = Tensor::new(pos_emb_data, vec![T, self.n_embd()], false);
         
-        let mut x = (&tok_emb).add(&pos_emb);
+        let x = tok_emb.add(&pos_emb);
+        
+        // Reshape to 3D [1, T, n_embd] for transformer blocks
+        let x_3d = x.reshape(vec![1, T, self.n_embd()]);
         
         // Pass through Transformer blocks
         let mut new_caches = Vec::new();
         for block in &self.blocks {
             let layer_cache = kv_caches.as_ref().map(|c| (&c[0].0, &c[0].1));
-            let (out, cache) = block.forward(&x, layer_cache);
-            x = out;
+            let (out, cache) = block.forward_raw(&x_3d, layer_cache);
             new_caches.push(cache);
         }
         
         // Final normalization
-        let x = self.ln_f.forward(&x);
+        let x_norm = self.ln_f.forward(&x_3d);
         
         // Project to vocabulary
-        let logits = self.lm_head.forward(&x);
+        let logits = self.lm_head.forward(&x_norm);
         
-        (logits, new_caches)
+        // Reshape logits back to 2D [T, vocab_size]
+        let vocab_size = self.lm_head.weight.shape[0];
+        let logits_2d = logits.reshape(vec![T, vocab_size]);
+        
+        (logits_2d, new_caches)
     }
     
     fn n_embd(&self) -> usize {
@@ -200,6 +223,12 @@ impl GPT {
 }
 
 impl Module for GPT {
+    fn forward(&self, x: &Tensor) -> Tensor {
+        let indices: Vec<usize> = x.data.borrow().iter().map(|&v| v as usize).collect();
+        let (logits, _) = self.forward_idx(&indices, None);
+        logits
+    }
+
     fn parameters(&self) -> Vec<&Tensor> {
         let mut params = self.wte.parameters();
         params.extend(self.wpe.parameters());

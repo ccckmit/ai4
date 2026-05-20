@@ -1,6 +1,6 @@
 //! nn/example.rs - Example of using neural network
 
-use nn::{Tensor, Linear, Embedding, Module};
+use ai4::{Tensor, Linear, Embedding, Module};
 
 fn main() {
     println!("=== Tensor Example ===");
@@ -32,6 +32,6 @@ fn main() {
     
     let embed = Embedding::new(100, 32);
     let indices = vec![5, 10, 15, 20];
-    let out = embed.forward(&indices);
+    let out = embed.embed(&indices);
     println!("Embedding(100, 32): output shape = {:?}", out.shape);
 }

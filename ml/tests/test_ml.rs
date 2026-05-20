@@ -1,6 +1,6 @@
-//! tests/test_ml.rs - ML toolkit tests.
+//! ml/tests/test_ml.rs - ML toolkit tests.
 
-use ai4::{LinearRegression, LogisticRegression, KMeans, PCA, StandardScaler, accuracy_score, mean_squared_error, r2_score};
+use crate::ml::{LinearRegression, LogisticRegression, KMeans, PCA, StandardScaler, accuracy_score, mean_squared_error, r2_score};
 
 #[test]
 fn test_linear_regression() {

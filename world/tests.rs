@@ -1,8 +1,9 @@
 //! world/tests.rs
 //! Basic smoke tests for world.
 
-use world::spaces::{Discrete, Box};
-use world::utils::run_random_agent;
+use crate::world::core::Env;
+use crate::world::spaces::{Discrete, Box};
+use crate::world::utils::run_random_agent;
 
 #[test]
 fn test_discrete_space() {
@@ -28,7 +29,7 @@ fn test_box_space() {
 
 #[test]
 fn test_frozen_lake_reset() {
-    use world::envs::FrozenLakeEnv;
+    use crate::world::envs::FrozenLakeEnv;
     let mut env = FrozenLakeEnv::new("4x4", None, true, None);
     let (obs, info) = env.reset(Some(0));
     assert_eq!(obs, 0, "Expected start state 0, got {}", obs);
@@ -36,25 +37,25 @@ fn test_frozen_lake_reset() {
 
 #[test]
 fn test_frozen_lake_step() {
-    use world::envs::FrozenLakeEnv;
+    use crate::world::envs::FrozenLakeEnv;
     let mut env = FrozenLakeEnv::new("4x4", None, false, None);
     let (obs, _) = env.reset(Some(1));
     let result = env.step(2);
-    assert!(result.observation >= 0);
+    let _obs = result.observation;
 }
 
 #[test]
 fn test_frozen_lake_unpack() {
-    use world::envs::FrozenLakeEnv;
+    use crate::world::envs::FrozenLakeEnv;
     let mut env = FrozenLakeEnv::new("4x4", None, false, None);
     env.reset(Some(0));
     let result = env.step(1);
-    assert!(result.observation >= 0);
+    let _obs = result.observation;
 }
 
 #[test]
 fn test_frozen_lake_full_episode() {
-    use world::envs::FrozenLakeEnv;
+    use crate::world::envs::FrozenLakeEnv;
     let mut env = FrozenLakeEnv::new("4x4", None, false, None);
     let (obs, _) = env.reset(Some(42));
     let mut done = false;
@@ -69,15 +70,15 @@ fn test_frozen_lake_full_episode() {
 
 #[test]
 fn test_cartpole_reset() {
-    use world::envs::CartPoleEnv;
+    use crate::world::envs::CartPoleEnv;
     let mut env = CartPoleEnv::new(500, None);
     let (obs, _info) = env.reset(Some(0));
-    assert_eq!(obs.len(), 4, "Expected shape (4,), got {:?}", obs);
+    assert_eq!(obs.len(), 4_usize, "Expected shape (4,), got {:?}", obs);
 }
 
 #[test]
 fn test_cartpole_step() {
-    use world::envs::CartPoleEnv;
+    use crate::world::envs::CartPoleEnv;
     let mut env = CartPoleEnv::new(500, None);
     env.reset(Some(0));
     let result = env.step(0);
@@ -87,7 +88,7 @@ fn test_cartpole_step() {
 
 #[test]
 fn test_cartpole_full_episode() {
-    use world::envs::CartPoleEnv;
+    use crate::world::envs::CartPoleEnv;
     let mut env = CartPoleEnv::new(500, None);
     let (obs, _) = env.reset(Some(7));
     let mut total_reward = 0.0;
@@ -102,17 +103,17 @@ fn test_cartpole_full_episode() {
 
 #[test]
 fn test_cartpole_invalid_action() {
-    use world::envs::CartPoleEnv;
+    use crate::world::envs::CartPoleEnv;
     let mut env = CartPoleEnv::new(500, None);
     let (_, _) = env.reset(Some(0));
 }
 
 #[test]
 fn test_time_limit_wrapper() {
-    use world::envs::CartPoleEnv;
-    use world::wrappers::TimeLimitWrapper;
+    use crate::world::envs::CartPoleEnv;
+    use crate::world::wrappers::TimeLimitWrapper;
     let env = CartPoleEnv::new(500, None);
-    let mut wrapped = TimeLimitWrapper::new(Box::new(env), 5);
+    let mut wrapped = TimeLimitWrapper::new(std::boxed::Box::new(env), 5);
     wrapped.reset(Some(0));
     
     for _ in 0..4 {
@@ -126,7 +127,7 @@ fn test_time_limit_wrapper() {
 
 #[test]
 fn test_registry() {
-    let r = world::registry();
+    let r = crate::world::registry();
     assert!(r.contains(&"FrozenLake-v0".to_string()));
     assert!(r.contains(&"FrozenLake-v1".to_string()));
     assert!(r.contains(&"CartPole-v1".to_string()));

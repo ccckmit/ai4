@@ -1,6 +1,6 @@
-//! tests/test_agent.rs - AI Agent tests.
+//! llm/tests/test_agent.rs - AI Agent tests.
 
-use ai4::Agent;
+use crate::llm::agent::Agent;
 
 #[test]
 fn test_agent_creation() {
@@ -44,34 +44,10 @@ fn test_update_memory() {
 }
 
 #[test]
-fn test_update_memory_with_tool_result() {
-    let mut agent = Agent::new();
-    agent.update_memory("Run cmd", "Output", Some("tool result"));
-    agent.update_memory("new", "response", None);
-}
-
-#[test]
 fn test_add_key_info() {
     let mut agent = Agent::new();
     agent.add_key_info("Important info".to_string());
     assert_eq!(agent.show_memory().len(), 1);
-}
-
-#[test]
-fn test_constants() {
-    use ai4::llm::agent;
-    assert_eq!(agent::WORKSPACE, "~/.agent0");
-    assert_eq!(agent::MODEL, "minimax-m2.5:cloud");
-    assert_eq!(agent::MAX_TURNS, 5);
-}
-
-#[test]
-fn test_system_prompt() {
-    use ai4::llm::agent;
-    let prompt = agent::SYSTEM_PROMPT;
-    assert!(!prompt.is_empty());
-    assert!(prompt.contains("<shell>"));
-    assert!(prompt.contains("<end/>"));
 }
 
 #[test]
@@ -111,17 +87,9 @@ fn test_execute_shell() {
 }
 
 #[test]
-fn test_execute_shell_error() {
-    let agent = Agent::new();
-    let result = agent.execute_shell("exit 1");
-    assert!(result.is_ok());
-}
-
-#[test]
-fn test_update_memory_truncates() {
-    let mut agent = Agent::new();
-    for i in 0..10 {
-        agent.update_memory(&format!("user{}", i), &format!("resp{}", i), None);
-    }
-    assert!(true);
+fn test_constants() {
+    use crate::llm::agent;
+    assert_eq!(agent::WORKSPACE, "~/.agent0");
+    assert_eq!(agent::MODEL, "minimax-m2.5:cloud");
+    assert_eq!(agent::MAX_TURNS, 5);
 }

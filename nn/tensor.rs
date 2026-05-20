@@ -321,29 +321,51 @@ impl Tensor {
 
     pub fn cross_entropy(&self, targets: &[usize]) -> Tensor {
         let data = self.data.borrow();
-        let batch_size = self.shape[0];
-        let seq_len = self.shape[1];
-        let vocab_size = self.shape[2];
         
-        let max_logits: Vec<f32> = (0..batch_size * seq_len)
-            .map(|i| data[i * vocab_size..(i+1) * vocab_size].iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b)))
+        if targets.is_empty() || data.is_empty() {
+            return Tensor::new(vec![0.0], vec![1], self.requires_grad);
+        }
+        
+        let vocab_size = if self.shape.len() == 2 {
+            self.shape[1]
+        } else if self.shape.len() == 3 {
+            self.shape[2]
+        } else {
+            data.len() / targets.len().max(1)
+        };
+        
+        if vocab_size == 0 {
+            return Tensor::new(vec![0.0], vec![1], self.requires_grad);
+        }
+        
+        let n = (data.len() / vocab_size).max(1);
+        
+        let max_logits: Vec<f32> = (0..n)
+            .map(|i| {
+                let start = i * vocab_size;
+                let end = start + vocab_size;
+                data[start..end.min(data.len())].iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b))
+            })
             .collect();
         
         let mut loss = 0.0;
-        for b in 0..batch_size {
-            for t in 0..seq_len {
-                let idx = b * seq_len + t;
-                let offset = idx * vocab_size;
-                let exp_sum: f32 = data[offset..offset+vocab_size].iter()
-                    .map(|&x| (x - max_logits[idx]).exp())
-                    .sum();
-                
-                let target = targets[idx];
-                let prob = (data[offset + target] - max_logits[idx]).exp() / exp_sum;
+        for i in 0..n.min(targets.len()) {
+            let offset = i * vocab_size;
+            let end = (offset + vocab_size).min(data.len());
+            let exp_sum: f32 = data[offset..end].iter()
+                .map(|&x| (x - max_logits[i]).exp())
+                .sum();
+            
+            let target = targets[i];
+            if offset + target < data.len() {
+                let prob = (data[offset + target] - max_logits[i]).exp() / exp_sum.max(1e-10);
                 loss -= prob.max(1e-10).ln();
             }
         }
-        loss /= (batch_size * seq_len) as f32;
+        let m = n.min(targets.len()).max(1);
+        if m > 0 {
+            loss /= m as f32;
+        }
         
         let mut out = Tensor::new(vec![loss], vec![1], self.requires_grad);
         if self.requires_grad {

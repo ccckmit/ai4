@@ -7,6 +7,8 @@ pub mod spaces;
 pub mod envs;
 pub mod wrappers;
 pub mod utils;
+#[cfg(test)]
+mod tests;
 
 pub use core::{Env, StepResult};
 pub use spaces::{Discrete, Box as SpaceBox};

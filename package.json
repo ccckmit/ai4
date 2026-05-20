@@ -63,7 +63,10 @@
   "author": "Chung-Cheng Chen",
   "license": "MIT",
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.19.41",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.10",
     "typescript": "^5.3.0"
   }
 }

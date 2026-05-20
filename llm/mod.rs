@@ -4,3 +4,8 @@
 
 pub mod agent;
 pub use agent::Agent;
+
+#[cfg(test)]
+mod tests {
+    mod test_agent;
+}
