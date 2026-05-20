@@ -90,8 +90,8 @@ export class Tensor {
 
   mul(other: Tensor | number[][] | number): Tensor {
     const b = other instanceof Tensor ? other : new Tensor(Array.isArray(other) ? other : [[other]]);
-    const out = new Tensor(this.data.map((row, i) => row.map((x, j) => x * (b.data[i]?.[j] ?? 0))), [this, b]);
-    out.requires_grad = this.requires_grad || b.requires_grad;
+    const requiresGrad = this.requires_grad || b.requires_grad;
+    const out = new Tensor(this.data.map((row, i) => row.map((x, j) => x * (b.data[i]?.[j] ?? 0))), [this, b], requiresGrad);
     out._backward = () => {
       if (this.requires_grad) {
         const g = out.grad.map((row, i) => row.map((x, j) => x * (b.data[i]?.[j] ?? 0)));
