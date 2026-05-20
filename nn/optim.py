@@ -11,6 +11,19 @@ import numpy as np
 from .tensor import Tensor
 
 
+def mse_loss(input, target):
+    """Mean Squared Error loss."""
+    diff = input - target
+    out = Tensor(np.mean(diff.data ** 2), (input, target), input.requires_grad or target.requires_grad)
+
+    def _backward():
+        input.grad += 2 * diff.grad * diff.data / np.prod(diff.data.shape)
+        target.grad += -2 * diff.grad * diff.data / np.prod(diff.data.shape)
+
+    out._backward = _backward
+    return out
+
+
 class Module:
     """
     Base class for all neural network modules.
@@ -33,6 +46,32 @@ class Module:
                     if isinstance(item, Module):
                         params.extend(item.parameters())
         return params
+
+
+class Sequential(Module):
+    """Sequential container - applies modules in order."""
+
+    def __init__(self, *modules):
+        self.modules = modules
+
+    def __call__(self, x):
+        for m in self.modules:
+            x = m(x)
+        return x
+
+
+class ReLU(Module):
+    """ReLU activation layer."""
+
+    def __call__(self, x):
+        return x.relu()
+
+
+class Tanh(Module):
+    """Tanh activation layer."""
+
+    def __call__(self, x):
+        return x.tanh()
 
 
 class Linear(Module):
@@ -65,7 +104,6 @@ class Embedding(Module):
         self.weight = Tensor(np.random.normal(0, 0.08, (num_embeddings, embedding_dim)), requires_grad=True)
 
     def __call__(self, indices):
-        # Support both Tensor and raw numpy array indices
         idx = indices.data.astype(int) if isinstance(indices, Tensor) else indices
         out_data = self.weight.data[idx]
         out = Tensor(out_data, (self.weight,), requires_grad=True)
@@ -89,7 +127,6 @@ class RMSNorm(Module):
         self.scale = Tensor(np.ones(dim), requires_grad=False)
 
     def __call__(self, x):
-        # RMS = sqrt(mean(x^2) + eps)
         ms = np.mean(x.data ** 2, axis=-1, keepdims=True) + self.eps
         inv_std = ms ** -0.5
         out_data = x.data * inv_std
@@ -125,22 +162,18 @@ class Adam(Module):
         self.lr = lr
         self.beta1, self.beta2 = betas
         self.eps = eps
-        self.m = [np.zeros_like(p.data) for p in params]  # First moment
-        self.v = [np.zeros_like(p.data) for p in params]  # Second moment
-        self.t = 0  # Timestep for bias correction
+        self.m = [np.zeros_like(p.data) for p in params]
+        self.v = [np.zeros_like(p.data) for p in params]
+        self.t = 0
 
     def step(self):
         """Performs one optimization step."""
         self.t += 1
         for i, p in enumerate(self.params):
-            # Update biased first moment estimate
             self.m[i] = self.beta1 * self.m[i] + (1 - self.beta1) * p.grad
-            # Update biased second moment estimate
             self.v[i] = self.beta2 * self.v[i] + (1 - self.beta2) * (p.grad ** 2)
-            # Bias-corrected moments
             m_hat = self.m[i] / (1 - self.beta1 ** self.t)
             v_hat = self.v[i] / (1 - self.beta2 ** self.t)
-            # Parameter update
             p.data -= self.lr * m_hat / (np.sqrt(v_hat) + self.eps)
 
     def zero_grad(self):

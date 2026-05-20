@@ -48,25 +48,23 @@ class CartPoleEnv(Env[np.ndarray, int]):
     max_steps : int
         Episode truncation limit (default 500, same as gym CartPole-v1).
     render_mode : str or None
-        ``"ansi"`` for text rendering.
+        ``"ansi"`` for text rendering, ``"human"`` for pygame window.
     """
 
-    metadata = {"render_modes": ["ansi"]}
+    metadata = {"render_modes": ["ansi", "human"]}
     reward_range = (0.0, 1.0)
 
-    # Physics constants (match OpenAI Gym exactly)
     GRAVITY = 9.8
     MASS_CART = 1.0
     MASS_POLE = 0.1
     TOTAL_MASS = MASS_CART + MASS_POLE
-    HALF_POLE_LENGTH = 0.5   # half the pole's length
+    HALF_POLE_LENGTH = 0.5
     POLE_MASS_LENGTH = MASS_POLE * HALF_POLE_LENGTH
     FORCE_MAG = 10.0
-    TAU = 0.02  # seconds per step
+    TAU = 0.02
 
-    # Termination thresholds
     X_THRESHOLD = 2.4
-    THETA_THRESHOLD_RAD = 12 * math.pi / 180  # 12 degrees
+    THETA_THRESHOLD_RAD = 12 * math.pi / 180
 
     def __init__(
         self,
@@ -91,6 +89,10 @@ class CartPoleEnv(Env[np.ndarray, int]):
         self._state: Optional[np.ndarray] = None
         self._steps = 0
         self._np_random = np.random.default_rng()
+
+        self._pygame = None
+        self._screen = None
+        self._clock = None
 
     # ------------------------------------------------------------------ #
     #  Space properties                                                    #
@@ -167,41 +169,96 @@ class CartPoleEnv(Env[np.ndarray, int]):
     #  Rendering                                                           #
     # ------------------------------------------------------------------ #
 
-    def render(self, mode: str = "ansi") -> str:
+    def render(self, mode: Optional[str] = None) -> Optional[str]:
         if self._state is None:
-            return ""
+            return None
+
+        if mode is None:
+            mode = self._render_mode or "ansi"
 
         x, _, theta, _ = self._state
-        width = 60
-        cart_col = int((x + self.X_THRESHOLD) / (2 * self.X_THRESHOLD) * (width - 1))
-        cart_col = max(0, min(width - 1, cart_col))
 
-        # Pole tip offset
-        pole_tip_offset = int(math.sin(theta) * 10)
-        pole_col = max(0, min(width - 1, cart_col + pole_tip_offset))
+        if mode == "ansi":
+            width = 60
+            cart_col = int((x + self.X_THRESHOLD) / (2 * self.X_THRESHOLD) * (width - 1))
+            cart_col = max(0, min(width - 1, cart_col))
 
-        # Draw track
-        track = ["-"] * width
-        track[cart_col] = "█"
+            pole_tip_offset = int(math.sin(theta) * 10)
+            pole_col = max(0, min(width - 1, cart_col + pole_tip_offset))
 
-        # Draw pole above cart
-        pole_row = [" "] * width
-        # line from cart to pole tip
-        for col in range(min(cart_col, pole_col), max(cart_col, pole_col) + 1):
-            pole_row[col] = "/"  if theta > 0 else "\\"
-        pole_row[pole_col] = "O"
+            track = ["-"] * width
+            track[cart_col] = "█"
 
-        theta_deg = math.degrees(theta)
-        status = (
-            f"  x={x:+.3f}  θ={theta_deg:+.1f}°  steps={self._steps}"
-        )
+            pole_row = [" "] * width
+            for col in range(min(cart_col, pole_col), max(cart_col, pole_col) + 1):
+                pole_row[col] = "/" if theta > 0 else "\\"
+            pole_row[pole_col] = "O"
 
-        out = (
-            "┌" + "─" * width + "┐\n"
-            "│" + "".join(pole_row) + "│\n"
-            "│" + "".join(track) + "│\n"
-            "└" + "─" * width + "┘\n"
-            + status
-        )
-        print(out)
-        return out
+            theta_deg = math.degrees(theta)
+            status = f"  x={x:+.3f}  θ={theta_deg:+.1f}°  steps={self._steps}"
+
+            out = (
+                "┌" + "─" * width + "┐\n"
+                "│" + "".join(pole_row) + "│\n"
+                "│" + "".join(track) + "│\n"
+                "└" + "─" * width + "┘\n"
+                + status
+            )
+            print(out)
+            return out
+
+        elif mode == "human":
+            if self._pygame is None:
+                try:
+                    import pygame
+                    self._pygame = pygame
+                    pygame.init()
+                    self._screen = pygame.display.set_mode((800, 400))
+                    pygame.display.set_caption("CartPole")
+                    self._clock = pygame.time.Clock()
+                except ImportError:
+                    print("Install pygame: pip install pygame")
+                    return None
+
+            for event in self._pygame.event.get():
+                if event.type == self._pygame.QUIT:
+                    self._pygame.quit()
+                    self._pygame = None
+                    return None
+
+            WHITE = (255, 255, 255)
+            BLACK = (0, 0, 0)
+            BLUE = (50, 100, 200)
+            RED = (200, 50, 50)
+            GRAY = (150, 150, 150)
+
+            self._screen.fill(WHITE)
+            self._pygame.draw.line(self._screen, GRAY, (50, 250), (750, 250), 2)
+
+            cart_x = int(400 + x * 100)
+            cart_y = 220
+            self._pygame.draw.rect(self._screen, BLUE, (cart_x - 40, cart_y - 15, 80, 30))
+
+            pole_len = 100
+            pole_end_x = cart_x + pole_len * math.sin(theta)
+            pole_end_y = cart_y - 15 - pole_len * math.cos(theta)
+            self._pygame.draw.line(self._screen, BLACK, (cart_x, cart_y - 15), (pole_end_x, pole_end_y), 4)
+            self._pygame.draw.circle(self._screen, RED, (int(pole_end_x), int(pole_end_y)), 8)
+
+            font = self._pygame.font.Font(None, 32)
+            info = font.render(f"Steps: {self._steps}  x: {x:.2f}  θ: {theta*180/3.14159:.1f}°", True, BLACK)
+            self._screen.blit(info, (20, 20))
+
+            self._pygame.display.flip()
+            self._clock.tick(30)
+            return None
+
+        return None
+
+def close(self):
+        if self._pygame:
+            self._pygame.quit()
+            self._pygame = None
+            self._screen = None
+
+        return None

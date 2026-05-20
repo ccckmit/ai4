@@ -143,6 +143,37 @@ class Tensor:
         out._backward = _backward
         return out
 
+    def tanh(self):
+        """Tanh: (exp(x) - exp(-x)) / (exp(x) + exp(-x))"""
+        out = Tensor(np.tanh(self.data), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad * (1 - out.data ** 2)
+
+        out._backward = _backward
+        return out
+
+    def clamp(self, min_val=None, max_val=None):
+        """Clamp tensor values to [min, max] range."""
+        out = Tensor(np.clip(self.data, min_val, max_val), (self,), self.requires_grad)
+
+        def _backward():
+            mask = (self.data >= min_val) & (self.data <= max_val) if min_val is not None and max_val is not None else np.ones_like(self.data)
+            self.grad += out.grad * mask
+
+        out._backward = _backward
+        return out
+
+    def abs(self):
+        """Absolute value."""
+        out = Tensor(np.abs(self.data), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += out.grad * np.sign(self.data)
+
+        out._backward = _backward
+        return out
+
     def masked_fill(self, mask, value):
         """Replaces values where mask is True with value. Gradient: mask out gradient at True positions."""
         out_data = np.where(mask, value, self.data)
@@ -226,6 +257,16 @@ class Tensor:
 
         def _backward():
             self.grad += np.ones_like(self.data) * out.grad
+
+        out._backward = _backward
+        return out
+
+    def mean(self, axis=None, keepdims=False):
+        """Mean over specified axis."""
+        out = Tensor(self.data.mean(axis=axis, keepdims=keepdims), (self,), self.requires_grad)
+
+        def _backward():
+            self.grad += np.ones_like(self.data) * out.grad / self.data.size
 
         out._backward = _backward
         return out

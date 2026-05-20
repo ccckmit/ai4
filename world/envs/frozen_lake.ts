@@ -76,11 +76,12 @@ export class FrozenLakeEnv extends Env<number, number> {
     this._steps++;
 
     if (this._is_slippery) {
-      const candidates = [(action - 1) % 4, action, (action + 1) % 4];
-      action = this._rng.choice(candidates as number[]);
+      const candidates = [(action - 1 + 4) % 4, action, (action + 1) % 4];
+      action = Math.floor(this._rng.choice(candidates as number[]));
     }
 
-    const [dr, dc] = ACTIONS[action];
+    const safeAction = ((action % 4) + 4) % 4;
+    const [dr, dc] = ACTIONS[safeAction];
     let nr = this._agent_pos[0] + dr;
     let nc = this._agent_pos[1] + dc;
     nr = Math.max(0, Math.min(nr, this._nrow - 1));

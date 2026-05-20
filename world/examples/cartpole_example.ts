@@ -49,7 +49,7 @@ function runPDAgent(episodes = 10, renderLast = true): void {
   if (renderLast) {
     console.log('\n  Rendering final episode with PD controller:\n');
     const resetResult = env.reset({ seed: 999 });
-    obs = resetResult.observation as number[];
+    let obs: number[] = resetResult.observation as number[];
     env.render();
     for (let i = 0; i < 500; i++) {
       const action = controller.act(obs);
