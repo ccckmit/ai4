@@ -163,7 +163,21 @@ export class Tensor {
     result._prev = [this];
     result._backward = () => {
       if (this.requires_grad) {
-        for (let i = 0; i < this.data.length; i++) this.grad[i] += result.grad[i];
+        for (let flat = 0; flat < this.data.length; flat++) {
+          const idx: number[] = [];
+          let rem = flat;
+          for (let d = 0; d < n; d++) {
+            idx.push(Math.floor(rem / strides[d]));
+            rem = rem % strides[d];
+          }
+          const newIdx = [...idx];
+          [newIdx[ax1], newIdx[ax2]] = [newIdx[ax2], newIdx[ax1]];
+          let newFlat = 0;
+          for (let d = 0; d < n; d++) {
+            newFlat += newIdx[d] * newStrides[d];
+          }
+          this.grad[flat] += result.grad[newFlat];
+        }
       }
     };
     return result;
@@ -214,6 +228,32 @@ export class Tensor {
         result[i] = t.data[srcIdx];
       }
       const tiled = new Tensor(result, outSh, t.requires_grad);
+      tiled._prev = [t];
+      tiled._backward = () => {
+        if (!t.requires_grad) return;
+        const n = outSh.length;
+        const m = sh.length;
+        if (sh.every((d, i) => d === outSh[i])) {
+          for (let i = 0; i < t.grad.length; i++) t.grad[i] += tiled.grad[i];
+          return;
+        }
+        const paddedSh = [...new Array(n - m).fill(1), ...sh];
+        const tStrides: number[] = [];
+        tStrides[m - 1] = 1;
+        for (let i = m - 2; i >= 0; i--) tStrides[i] = tStrides[i + 1] * sh[i + 1];
+        for (let flat = 0; flat < tiled.grad.length; flat++) {
+          let rem = flat;
+          let targetFlat = 0;
+          for (let d = n - 1; d >= 0; d--) {
+            const idx = rem % outSh[d];
+            rem = Math.floor(rem / outSh[d]);
+            if (paddedSh[d] > 1) {
+              targetFlat += idx * tStrides[d - (n - m)];
+            }
+          }
+          t.grad[targetFlat] += tiled.grad[flat];
+        }
+      };
       return tiled;
     };
 
@@ -235,13 +275,13 @@ export class Tensor {
     }
     const [a, b] = this.broadcastTo(other);
     const out = new Tensor(a.data.map((v, i) => v + b.data[i]), a.shape, a.requires_grad || b.requires_grad);
-    out._prev = [this, other];
+    out._prev = [a, b];
     out._backward = () => {
-      if (this.requires_grad) {
-        for (let i = 0; i < this.grad.length; i++) this.grad[i] += out.grad[i] * 1;
+      if (a.requires_grad) {
+        for (let i = 0; i < a.grad.length; i++) a.grad[i] += out.grad[i];
       }
-      if (other.requires_grad) {
-        for (let i = 0; i < other.grad.length; i++) other.grad[i] += out.grad[i] * 1;
+      if (b.requires_grad) {
+        for (let i = 0; i < b.grad.length; i++) b.grad[i] += out.grad[i];
       }
     };
     return out;
@@ -251,7 +291,14 @@ export class Tensor {
     if (typeof other === 'number') {
       return this.add(-other);
     }
-    const neg = new Tensor(other.data.map(v => -v), [...other.shape], other.requires_grad);
+    const negData = other.data.map(v => -v);
+    const neg = new Tensor(negData, [...other.shape], other.requires_grad);
+    neg._prev = [other];
+    neg._backward = () => {
+      if (other.requires_grad) {
+        for (let i = 0; i < other.grad.length; i++) other.grad[i] -= neg.grad[i];
+      }
+    };
     return this.add(neg);
   }
 
@@ -268,15 +315,13 @@ export class Tensor {
     }
     const [a, b] = this.broadcastTo(other);
     const out = new Tensor(a.data.map((v, i) => v * b.data[i]), a.shape, a.requires_grad || b.requires_grad);
-    out._prev = [this, other];
+    out._prev = [a, b];
     out._backward = () => {
-      if (this.requires_grad) {
-        const [aT, bT] = this.broadcastTo(other);
-        for (let i = 0; i < this.grad.length; i++) this.grad[i] += out.grad[i] * bT.data[i % bT.data.length];
+      if (a.requires_grad) {
+        for (let i = 0; i < a.grad.length; i++) a.grad[i] += out.grad[i] * b.data[i];
       }
-      if (other.requires_grad) {
-        const [aT, bT] = this.broadcastTo(other);
-        for (let i = 0; i < other.grad.length; i++) other.grad[i] += out.grad[i] * aT.data[i % aT.data.length];
+      if (b.requires_grad) {
+        for (let i = 0; i < b.grad.length; i++) b.grad[i] += out.grad[i] * a.data[i];
       }
     };
     return out;
@@ -318,30 +363,24 @@ export class Tensor {
 
     const aBatchSize = aPreface.reduce((a, b) => a * b, 1) || 1;
     const bBatchSize = bPreface.reduce((a, b) => a * b, 1) || 1;
-    const aBatchStrides = aPreface.length === 0 ? [0] : [];
-    for (let i = aPreface.length - 1; i >= 0; i--) {
-      aBatchStrides[i] = (aPreface[i + 1] ?? 1) * (aBatchStrides[i + 1] ?? 1);
-    }
-    const bBatchStrides = bPreface.length === 0 ? [0] : [];
-    for (let i = bPreface.length - 1; i >= 0; i--) {
-      bBatchStrides[i] = (bPreface[i + 1] ?? 1) * (bBatchStrides[i + 1] ?? 1);
-    }
+    const outBatchSize = outPreface.reduce((a, b) => a * b, 1) || 1;
+
+    const aBatchStride = M * K;
+    const bBatchStride = K * Db;
+    const outBatchStride = M * Db;
 
     const outData = new Array(outShape.reduce((a, b) => a * b, 1)).fill(0);
 
-    for (let batchA = 0; batchA < aBatchSize; batchA++) {
-      for (let batchB = 0; batchB < bBatchSize; batchB++) {
-        for (let i = 0; i < M; i++) {
-          for (let j = 0; j < Db; j++) {
-            let sum = 0;
-            for (let k = 0; k < K; k++) {
-              const aIdx = batchA * (aBatchStrides[0] ?? aPreface.length > 0 ? aBatchStrides[0] : M * K) + i * K + k;
-              const bIdx = batchB * (bBatchStrides[0] ?? bPreface.length > 0 ? bBatchStrides[0] : K * Db) + k * Db + j;
-              sum += a.data[aIdx] * b.data[bIdx];
-            }
-            const outIdx = batchA * (outStrides[0] ?? M * Db) + i * Db + j;
-            outData[outIdx] = sum;
+    for (let batch = 0; batch < outBatchSize; batch++) {
+      const ba = batch % aBatchSize;
+      const bb = batch % bBatchSize;
+      for (let i = 0; i < M; i++) {
+        for (let j = 0; j < Db; j++) {
+          let sum = 0;
+          for (let k = 0; k < K; k++) {
+            sum += a.data[ba * aBatchStride + i * K + k] * b.data[bb * bBatchStride + k * Db + j];
           }
+          outData[batch * outBatchStride + i * Db + j] = sum;
         }
       }
     }
@@ -350,39 +389,34 @@ export class Tensor {
     result._prev = [this, other];
 
     result._backward = () => {
-      const maxBatchSize = Math.max(aBatchSize, bBatchSize);
       if (this.requires_grad) {
         const grad = result.grad;
-        for (let batch = 0; batch < maxBatchSize; batch++) {
+        for (let batch = 0; batch < outBatchSize; batch++) {
           const ba = batch % aBatchSize;
           const bb = batch % bBatchSize;
           for (let i = 0; i < M; i++) {
             for (let k = 0; k < K; k++) {
               let g = 0;
               for (let j = 0; j < Db; j++) {
-                const outIdx = batch * (outStrides[0] ?? M * Db) + i * Db + j;
-                g += grad[outIdx] * other.data[bb * (bBatchStrides[0] ?? K * Db) + k * Db + j];
+                g += grad[batch * outBatchStride + i * Db + j] * other.data[bb * bBatchStride + k * Db + j];
               }
-              const aIdx = ba * (aBatchStrides[0] ?? M * K) + i * K + k;
-              this.grad[aIdx] += g;
+              this.grad[ba * aBatchStride + i * K + k] += g;
             }
           }
         }
       }
       if (other.requires_grad) {
         const grad = result.grad;
-        for (let batch = 0; batch < maxBatchSize; batch++) {
+        for (let batch = 0; batch < outBatchSize; batch++) {
           const ba = batch % aBatchSize;
           const bb = batch % bBatchSize;
           for (let k = 0; k < K; k++) {
             for (let j = 0; j < Db; j++) {
               let g = 0;
               for (let i = 0; i < M; i++) {
-                const outIdx = batch * (outStrides[0] ?? M * Db) + i * Db + j;
-                g += grad[outIdx] * this.data[ba * (aBatchStrides[0] ?? M * K) + i * K + k];
+                g += grad[batch * outBatchStride + i * Db + j] * this.data[ba * aBatchStride + i * K + k];
               }
-              const bIdx = bb * (bBatchStrides[0] ?? K * Db) + k * Db + j;
-              other.grad[bIdx] += g;
+              other.grad[bb * bBatchStride + k * Db + j] += g;
             }
           }
         }
@@ -449,30 +483,60 @@ export class Tensor {
       };
       return result;
     }
-    const axes = Array.isArray(axis) ? axis : [axis];
+    const axes = (Array.isArray(axis) ? axis : [axis]).map(a => a < 0 ? this.shape.length + a : a);
     const n = this.shape.length;
-    const outShape = this.shape.filter((_, i) => !axes.includes(n - 1 - i) && !axes.includes(i));
-    const size = outShape.length === 0 ? 1 : outShape.reduce((a, b) => a * b, 1);
-    const out = new Tensor(new Array(size).fill(0), outShape.length === 0 ? [1] : outShape, this.requires_grad);
+    const sortedAxes = [...axes].sort((a, b) => b - a);
+    const outShape = this.shape.filter((_, i) => !axes.includes(i));
+    const outSize = outShape.length === 0 ? 1 : outShape.reduce((a, b) => a * b, 1);
+    const outShapeFinal = outShape.length === 0 ? [1] : outShape;
+
+    const outData = new Array(outSize).fill(0);
+    const inStrides = this.strides();
+    const outStrides: number[] = [];
+    outStrides[outShapeFinal.length - 1] = 1;
+    for (let i = outShapeFinal.length - 2; i >= 0; i--) outStrides[i] = outStrides[i + 1] * outShapeFinal[i + 1];
+
+    for (let flat = 0; flat < this.data.length; flat++) {
+      let outFlat = 0;
+      let rem = flat;
+      for (let d = 0; d < n; d++) {
+        const idx = Math.floor(rem / inStrides[d]);
+        rem = rem % inStrides[d];
+        if (!axes.includes(d)) {
+          const outDimIdx = outShapeFinal.length - 1 - (n - 1 - d);
+          let realOutDim = outShapeFinal.length - 1;
+          for (let dd = n - 1; dd >= 0; dd--) {
+            if (dd === d && !axes.includes(dd)) {
+              realOutDim = outShapeFinal.length - 1;
+              for (let k = n - 1; k > dd; k--) if (!axes.includes(k)) realOutDim--;
+              outFlat += idx * (realOutDim >= 0 ? outStrides[realOutDim] : 0);
+              break;
+            }
+          }
+        }
+      }
+      outData[outFlat] += this.data[flat];
+    }
+
+    const out = new Tensor(outData, outShapeFinal, this.requires_grad);
     out._prev = [this];
     const a = this;
     out._backward = () => {
       if (!a.requires_grad) return;
-      const gradOut = out.grad;
-      let outIdx = 0;
-      const loops = (dims: number[], offset: number) => {
-        if (dims.length === 0) {
-          for (let i = 0; i < a.data.length; i++) {
-            a.grad[i] += gradOut[outIdx];
+      for (let flat = 0; flat < a.data.length; flat++) {
+        let outFlat = 0;
+        let rem = flat;
+        for (let d = 0; d < n; d++) {
+          const idx = Math.floor(rem / inStrides[d]);
+          rem = rem % inStrides[d];
+          if (!axes.includes(d)) {
+            let outDim = outShapeFinal.length - 1;
+            for (let k = n - 1; k > d; k--) if (!axes.includes(k)) outDim--;
+            outFlat += idx * outStrides[outDim];
           }
-          outIdx++;
-          return;
         }
-        for (let i = 0; i < dims[0]; i++) {
-          loops(dims.slice(1), offset * dims[0] + i);
-        }
-      };
-      loops(this.shape, 0);
+        a.grad[flat] += out.grad[outFlat];
+      }
     };
     return out;
   }
@@ -513,7 +577,7 @@ export class Tensor {
       if (this.requires_grad) {
         for (let i = 0; i < this.grad.length; i++) {
           const v = this.data[i];
-          if ((min !== undefined && v >= min) || (max !== undefined && v <= max) || (min === undefined && max === undefined)) {
+          if ((min === undefined || v >= min) && (max === undefined || v <= max)) {
             this.grad[i] += out.grad[i];
           }
         }
@@ -661,29 +725,57 @@ export function cat(tensors: Tensor[], axis = 0): Tensor {
   const n = tensors[0].shape.length;
   axis = axis < 0 ? n + axis : axis;
   const outShape = [...tensors[0].shape];
-  let total = 0;
-  for (const t of tensors) total += t.shape[axis];
-  outShape[axis] = total;
+  for (let i = 1; i < tensors.length; i++) outShape[axis] += tensors[i].shape[axis];
 
-  const stride = tensors[0].shape.slice(axis + 1).reduce((a, b) => a * b, 1) || 1;
+  const outStrides = new Array(n);
+  outStrides[n - 1] = 1;
+  for (let i = n - 2; i >= 0; i--) outStrides[i] = outStrides[i + 1] * outShape[i + 1];
+
   const outData = new Array(outShape.reduce((a, b) => a * b, 1));
-  let offset = 0;
+
+  let dimOffset = 0;
   for (const t of tensors) {
-    for (let i = 0; i < t.data.length; i++) {
-      outData[offset + i] = t.data[i];
+    const inStrides = new Array(n);
+    inStrides[n - 1] = 1;
+    for (let i = n - 2; i >= 0; i--) inStrides[i] = inStrides[i + 1] * t.shape[i + 1];
+    for (let f = 0; f < t.data.length; f++) {
+      const idx = new Array(n);
+      let rem = f;
+      for (let d = 0; d < n; d++) {
+        idx[d] = Math.floor(rem / inStrides[d]);
+        rem = rem % inStrides[d];
+      }
+      idx[axis] += dimOffset;
+      let of = 0;
+      for (let d = 0; d < n; d++) of += idx[d] * outStrides[d];
+      outData[of] = t.data[f];
     }
-    offset += t.data.length;
+    dimOffset += t.shape[axis];
   }
 
   const result = new Tensor(outData, outShape, tensors.some(t => t.requires_grad));
   result._prev = tensors;
   result._backward = () => {
-    let off = 0;
+    let dOff = 0;
     for (const t of tensors) {
       if (t.requires_grad) {
-        for (let i = 0; i < t.grad.length; i++) t.grad[i] += result.grad[off + i];
+        const inStrides = new Array(n);
+        inStrides[n - 1] = 1;
+        for (let i = n - 2; i >= 0; i--) inStrides[i] = inStrides[i + 1] * t.shape[i + 1];
+        for (let f = 0; f < t.data.length; f++) {
+          const idx = new Array(n);
+          let rem = f;
+          for (let d = 0; d < n; d++) {
+            idx[d] = Math.floor(rem / inStrides[d]);
+            rem = rem % inStrides[d];
+          }
+          idx[axis] += dOff;
+          let of = 0;
+          for (let d = 0; d < n; d++) of += idx[d] * outStrides[d];
+          t.grad[f] += result.grad[of];
+        }
       }
-      off += t.data.length;
+      dOff += t.shape[axis];
     }
   };
   return result;

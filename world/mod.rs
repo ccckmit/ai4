@@ -7,6 +7,7 @@ pub mod spaces;
 pub mod envs;
 pub mod wrappers;
 pub mod utils;
+pub mod render;
 #[cfg(test)]
 mod tests;
 

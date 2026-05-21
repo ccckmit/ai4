@@ -7,3 +7,4 @@ export { TimeLimitWrapper } from './wrappers/time_limit';
 export { RecordEpisodeWrapper } from './wrappers/record_episode';
 export { make, register } from './utils/registry';
 export { run_random_agent, run_pd_agent } from './utils/random_agent';
+export { startServer, sendFrame, stopServer } from './render/server';

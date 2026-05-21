@@ -1,5 +1,6 @@
 import { Env, StepResult } from '../core';
 import { Discrete } from '../spaces/discrete';
+import { sendFrame } from '../render/server';
 
 const GRAVITY = 9.8;
 const MASS_CART = 1.0;
@@ -83,15 +84,17 @@ export class CartPoleEnv extends Env<number[], number> {
     );
   }
 
-  render(): void {
-    const cart = '█'.repeat(50);
-    const x = this._x;
-    const cartPos = Math.round(25 + x * 10);
-    const theta = this._theta;
-    const poleLen = 20;
-    const poleX = cartPos + Math.round(Math.sin(theta) * poleLen);
-    const poleY = 40 - Math.round(Math.cos(theta) * poleLen);
-
-    console.log('x=' + x.toFixed(3) + ' θ=' + (theta * 180 / Math.PI).toFixed(1) + '°');
+  render(mode: 'ansi' | 'human' = 'ansi'): void {
+    if (mode === 'human') {
+      sendFrame({
+        x: this._x,
+        theta: this._theta,
+        steps: this._steps,
+        reward: 0,
+        done: this._steps >= this._max_steps,
+      });
+    } else {
+      console.log('x=' + this._x.toFixed(3) + ' θ=' + (this._theta * 180 / Math.PI).toFixed(1) + '°');
+    }
   }
 }

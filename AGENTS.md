@@ -1,84 +1,99 @@
 # AGENTS.md
 
-## 套件結構
+## Tri-lingual polyglot repo
 
-4 個獨立子套件（純 Python + NumPy，無外部 ML 框架依賴）：
+Every module (`world`, `nn`, `ml`, `llm`) has implementations in **Python**, **TypeScript**, and **Rust** (parallel files like `core.py` / `core.ts` / `core.rs`).
 
-| 目錄 | 說明 | 主要模組 |
-|------|------|----------|
-| `world/` | RL 環境框架（Gym 風格） | `core.py`, `envs/`, `spaces/`, `wrappers/`, `utils/` |
-| `nn/` | DIY 深度學習框架（自動微分） | `tensor.py`, `nn.py`, `gpt.py`, `cnn.py`, `datasets.py` |
-| `ml/` | 機器學習工具箱 | `linear_models`, `tree`, `ensemble`, `clustering`, `decomposition`, `metrics`, `preprocessing` |
-| `llm/` | LLM 代理框架（Python + TypeScript + Rust） | `agent.py`, `agent.ts`, `agent.rs` |
+## Package structure
 
-**重要：`ml` 和 `llm` 不是 `ai4` 的子模組。** 只能透過 `PYTHONPATH=. import ml` 或单独安装使用。
+| Dir | What | Python import | TS import (from `dist/`) |
+|-----|------|---------------|--------------------------|
+| `world/` | RL envs (Gym-style) | `import world` | `import { ... } from 'ai4/world'` |
+| `nn/` | Neural nets + autodiff | `import nn` | `import { ... } from 'ai4/nn'` |
+| `ml/` | sklearn-style ML toolkit | `import ml` | `import { ... } from 'ai4/ml'` |
+| `llm/` | LLM agent (Ollama-based) | `import llm` | `import { ... } from 'ai4/llm'` |
 
-## 匯入方式
+- `world` and `nn` re-exported from `ai4`: `from ai4 import world` / `from ai4 import nn`
+- `ml` and `llm` NOT re-exported — use `PYTHONPATH=. import ml` / `import llm`
+- TS entry points are `*/index.ts` (not `__init__.ts`). `llm/index.ts` exports `{}` — nothing is importable from `ai4/llm` in TS.
 
-### world / nn（可安裝為 pip 套件）
-```python
-# 方式 1：PYTHONPATH（開發用）
-import world
-env = world.make("FrozenLake-v1")
+## Python
 
-# 方式 2：pip 安裝（需先 `pip install -e .`）
-from ai4 import world
-env = world.make("FrozenLake-v1")
-```
-
-### ml / llm（僅 PYTHONPATH）
-```bash
-export PYTHONPATH=/path/to/ai4
-```
-```python
-import ml
-from ml import LinearRegression
-import llm
-from llm import call_ollama
-```
-
-## 測試
+**`uv run python` / `uv run pytest` preferred. `PYTHONPATH=. python` / `PYTHONPATH=. pytest` also works.**
+Scripts (`pytest.sh`, `pyrun.sh`) auto-set `PYTHONPATH=.`.
 
 ```bash
-# Python（uv + pytest）
-./pytest.sh                    # 全部測試
-uv run pytest world/tests       # 單一模組
-uv run pytest nn/tests
-uv run pytest ml/tests
-
-# TypeScript（npx tsx）
-./jstest.sh                    # 全部測試（需在 repo 根目錄）
-npx tsx world/tests/test_world.ts
-npx tsx nn/tests/test_nn.ts
-npx tsx nn/tests/test_tensor.ts
-npx tsx nn/tests/test_by_claude.ts
-npx tsx nn/tests/test_gpt.ts    # 可選（有 GPU 需求）
-npx tsx ml/tests/test_ml.ts
-npx tsx llm/tests/test_agent.ts # 可選（需要 ollama）
+./pytest.sh                              # all Python tests (all 4 modules)
+uv run pytest world/tests                # single module
+uv run pytest nn/tests/test_tensor.py    # single file
 ```
 
-## 重要約定
+Pytest test paths: `world/tests`, `nn/tests`, `ml/tests` (from `pyproject.toml`).
+`llm/tests` is NOT in `pyproject.toml` testpaths but `pytest.sh` runs it explicitly.
 
-- **uv** — 所有 Python 腳本使用 `uv run python` 或 `uv run pytest`
-- **PYTHONPATH** — `pytest.sh` 自動設定；獨立執行時需手動設為 repo 根目錄
-- **TypeScript** — 使用 `npx tsx` 執行 `.ts` 檔案（非 node/jest）
-- **world.step() 回傳** — `StepResult` 可解包為 5 元組：`obs, reward, terminated, truncated, info`
-- **Python 程式碼註解** — 使用英文；理論文件使用繁體中文
+Important — `nn.chargpt_demo` uses relative imports, must run as module:
+```bash
+python -m nn.chargpt_demo    # correct
+python nn/chargpt_demo.py    # FAILS
+```
 
-## Python ↔ TypeScript 測試對照
+## TypeScript — two test runners
 
-| Python | TypeScript |
-|---------|------------|
-| `world/tests/test_world.py` | `world/tests/test_world.ts` |
-| `nn/tests/test_nn.py` | `nn/tests/test_nn.ts` |
-| `nn/tests/test_tensor.py` | `nn/tests/test_tensor.ts` |
-| `nn/tests/test_by_claude.py` | `nn/tests/test_by_claude.ts` |
-| `nn/tests/test_gpt.py` | `nn/tests/test_gpt.ts` |
-| `ml/tests/test_ml.py` | `ml/tests/test_ml.ts` |
-| `llm/tests/test_agent.py` | `llm/tests/test_agent.ts` |
+| Runner | Pattern | Example |
+|--------|---------|---------|
+| `npx tsx` | bare `.ts` (no `.test.ts`) | `npx tsx world/tests/test_world.ts` |
+| `npx jest` | `**/tests/**/*.test.ts` | `npx jest nn/tests/test_tensor --no-coverage` |
 
-## 文檔位置
+`npx tsx` files use plain `import` + inline assert-style checks.
+`npx jest` files use `describe`/`test`/`expect`.
 
-- `README.md` / `world/README.md` / `nn/README.md` / `ml/README.md`
-- `\_wiki/` — 知識庫理論文章（繁體中文）
-- `nn/tensor.md`, `nn/gpt.md`, `world/core.md`, `ml/linear_models.md`
+```bash
+./jstest.sh                    # runs ALL (see jstest.sh for order)
+npx tsx nn/tests/test_nn.ts    # single bare test
+npx jest nn/tests/test_tensor  # single jest test (--no-coverage to skip coverage)
+```
+
+Build before importing from `dist/`:
+```bash
+npx tsc                  # outputs to dist/ (ESM, moduleResolution: bundler)
+```
+
+`tsconfig.json` excludes `test*.ts`, `*_test.ts`, and `examples/*.ts` from compilation.
+
+## Rust
+
+```bash
+cargo test --lib         # all Rust tests (alias: ./rstest.sh)
+cargo run --bin <name>   # Cargo.toml defines all bins
+```
+
+Rust **test files** live in each module's `tests.rs` or standalone files, integrated via `mod.rs` `#[cfg(test)]` blocks — they're NOT standalone crates.
+
+Rust **binary targets** are at arbitrary paths (not `src/bin/`). See `Cargo.toml` `[[bin]]` entries: `world_frozen_lake_example`, `world_frozenlake_qtable`, `world_cartpole_closed_form`, `nn_example`, `ml_example`, `chargpt_demo`, `mnist_train`.
+
+`lib.rs` uses `#![allow(dead_code, unused, non_snake_case, private_interfaces)]`.
+
+## Key scripts
+
+| Script | Action |
+|--------|--------|
+| `./pytest.sh` | All Python tests (all 4 modules) |
+| `./jstest.sh` | All TS tests (both runners) |
+| `./rstest.sh` | `cargo test --lib` |
+| `./pyrun.sh` | Run Python examples |
+| `./jsrun.sh` | Run TS examples |
+| `./rsrun.sh` | Run all Rust binaries |
+| `./cnntest.sh` | `uv run pytest nn/tests/test_cnn_gemini.py` |
+| `./mnist_run.sh` | Python MNIST training (hardcoded venv path, requires torch) |
+| `./pypub.sh` | PyPI publish (dry-run/test/prod) |
+
+## Conventions & quirks
+
+- **`StepResult`** dataclass unpacks as 5-tuple: `obs, reward, terminated, truncated, info`
+- **`nn.datasets`** (DataLoader, MNIST transforms) guarded by `try/except ImportError` — only available when torch is installed. TS/Rust versions exist but TS not exported from `nn/index.ts`.
+- **BipedalWalker-v3** is only registered in Python (not in TS or Rust).
+- **Python code comments**: English. Theory docs: Traditional Chinese (`_wiki/`, `*.md`).
+- **`llm/tests/test_agent`**: requires Ollama running locally. Test silently returns on failure (`2>/dev/null || true` in `jstest.sh`).
+- **PyPI publish**: `python -m build` + `twine`. See `pypub.sh`.
+- **Crates.io publish**: `cargo login && cargo publish` (see `rspub.sh`).
+- `checkpoints_ai4/` stores saved model weights (`.npz` files from SAC training).

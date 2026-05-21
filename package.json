@@ -65,8 +65,12 @@
   "devDependencies": {
     "@types/jest": "^30.0.0",
     "@types/node": "^20.19.41",
+    "@types/ws": "^8.18.1",
     "jest": "^30.4.2",
     "ts-jest": "^29.4.10",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "ws": "^8.20.1"
   }
 }

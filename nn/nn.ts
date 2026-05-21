@@ -129,9 +129,16 @@ export class RMSNorm extends Module {
     result._prev = [x];
     result._backward = () => {
       if (!x.requires_grad) return;
+      const D = x.shape[x.shape.length - 1];
       for (let i = 0; i < x.data.length; i++) {
-        const row = Math.floor(i / x.shape[x.shape.length - 1]);
-        x.grad[i] += result.grad[i] / ms[row];
+        const row = Math.floor(i / D);
+        const rowStart = row * D;
+        let dot = 0;
+        for (let j = 0; j < D; j++) {
+          dot += result.grad[rowStart + j] * x.data[rowStart + j];
+        }
+        const inv_std = 1.0 / ms[row];
+        x.grad[i] += result.grad[i] * inv_std - x.data[i] * inv_std * inv_std * inv_std * dot / D;
       }
     };
     return result;

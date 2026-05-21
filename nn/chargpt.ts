@@ -19,21 +19,22 @@ export function train_model(
     const n = Math.min(block_size, tokens.length - 1);
 
     const x = [tokens.slice(0, n)];
-    const y = [tokens.slice(1, n + 1)];
+    const y = tokens.slice(1, n + 1);
 
     optimizer.zeroGrad();
     const { logits } = model.forward(Tensor.from(x));
 
-    const loss = logits.cross_entropy(Tensor.from(y));
+    const BT = logits.shape[0] * logits.shape[1];
+    const vocab_size = logits.shape[logits.shape.length - 1];
+    const logits_flat = logits.reshape(BT, vocab_size);
+    const loss = logits_flat.cross_entropy(y);
     loss.backward();
 
     let total_norm = 0;
     for (const p of params) {
       if (p.grad) {
-        for (const row of p.grad) {
-          for (const g of row) {
-            total_norm += g * g;
-          }
+        for (const g of p.grad) {
+          total_norm += g * g;
         }
       }
     }
@@ -44,7 +45,7 @@ export function train_model(
       const clip_coef = max_norm / (total_norm + 1e-6);
       for (const p of params) {
         if (p.grad) {
-          p.grad = p.grad.map((row: number[]) => row.map((g: number) => g * clip_coef));
+          p.grad = p.grad.map((g: number) => g * clip_coef);
         }
       }
     }
@@ -52,7 +53,7 @@ export function train_model(
     optimizer.step();
     (optimizer as unknown as { lr: number }).lr = 0.01 * (1 - step / num_steps);
 
-    console.log(`step ${String(step + 1).padStart(4)} / ${num_steps} | loss ${(loss.data[0]?.[0] ?? 0).toFixed(4)}`);
+    console.log(`step ${String(step + 1).padStart(4)} / ${num_steps} | loss ${loss.data[0].toFixed(4)}`);
   }
 
   return model;
@@ -76,11 +77,14 @@ export function generate_samples(
     let kv_caches: { k: Tensor; v: Tensor }[] | undefined;
 
     for (let pos_id = 0; pos_id < block_size; pos_id++) {
-      const x = [[current_token]];
-      const { logits, caches } = model.forward(Tensor.from(x), kv_caches);
+      const x = Tensor.from([[current_token]]);
+      const { logits, caches } = model.forward(x, kv_caches);
       kv_caches = caches;
 
-      const last_logits: number[] = logits.data[0] ?? [];
+      const last_logits = logits.data.slice(
+        logits.data.length - vocab_size,
+        logits.data.length
+      );
       const max_log = Math.max(...last_logits);
       const exps = last_logits.map((v: number) => Math.exp((v - max_log) / temperature));
       const sum_exp = exps.reduce((a: number, b: number) => a + b, 0);

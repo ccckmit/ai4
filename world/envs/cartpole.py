@@ -208,6 +208,27 @@ class CartPoleEnv(Env[np.ndarray, int]):
             return out
 
         elif mode == "human":
+            # WebSocket render — push frame to browser viewer
+            try:
+                from world.render.server import send_frame as _send_frame
+                _send_frame(
+                    x=float(x),
+                    theta=float(theta),
+                    steps=self._steps,
+                    reward=1.0,
+                    done=False,
+                )
+            except ImportError:
+                pass
+
+            # skip pygame when WS render server is active
+            try:
+                from world.render.server import _http_server as _hs
+                if _hs is not None:
+                    return None
+            except ImportError:
+                pass
+
             if self._pygame is None:
                 try:
                     import pygame
@@ -217,7 +238,6 @@ class CartPoleEnv(Env[np.ndarray, int]):
                     pygame.display.set_caption("CartPole")
                     self._clock = pygame.time.Clock()
                 except ImportError:
-                    print("Install pygame: pip install pygame")
                     return None
 
             for event in self._pygame.event.get():
@@ -255,10 +275,14 @@ class CartPoleEnv(Env[np.ndarray, int]):
 
         return None
 
-def close(self):
+    def close(self):
         if self._pygame:
             self._pygame.quit()
             self._pygame = None
             self._screen = None
-
+        try:
+            from world.render.server import stop_server as _stop_server
+            _stop_server()
+        except ImportError:
+            pass
         return None
