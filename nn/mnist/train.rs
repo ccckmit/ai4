@@ -146,7 +146,7 @@ fn train() {
     
     // We only take a subset for quick testing if preferred, but here we just
     // load all and do a standard run.
-    let dataset = load_mnist("./data");
+    let dataset = load_mnist("./data/MNIST/raw");
     println!("Dataset: {} samples", dataset.count());
     let subset_size = 1000.min(dataset.count());
     let mut loader = DataLoader::new(dataset, 64, true);
@@ -174,17 +174,18 @@ fn train() {
             
             optimizer.zero_grad();
             let logits = model.forward(&x);
-            let logits_data = logits.data();
             
             let num_classes = 10;
             let expected = batch_size * num_classes;
-            if logits_data.len() != expected {
-                continue;
-            }
             
             let targets: Vec<usize> = labels.iter().map(|&l| l as usize % num_classes).collect();
             let loss = logits.cross_entropy(&targets);
             loss.backward();
+            
+            let logits_data = logits.data(); // moved after backward
+            if logits_data.len() != expected {
+                continue;
+            }
             optimizer.step();
             
             let loss_val = loss.data()[0];
@@ -214,7 +215,7 @@ fn train() {
         let accuracy = if total > 0 { 100.0 * correct as f64 / total as f64 } else { 0.0 };
         println!("Epoch {} Accuracy: {:.2}%", epoch + 1, accuracy);
         
-        loader = DataLoader::new(load_mnist("./data"), 64, true);
+        loader = DataLoader::new(load_mnist("./data/MNIST/raw"), 64, true);
     }
     
     let _ = std::fs::create_dir_all("nn/mnist");
