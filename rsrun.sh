@@ -13,7 +13,7 @@ cargo run --bin world_frozenlake_qtable
 echo ""
 echo "=== cartpole_closed_form ==="
 cargo run --bin world_cartpole_closed_form
-cargo run --bin world_cartpole_render_test
+# cargo run --bin world_cartpole_render_test
 
 echo ""
 echo "=== ml example ==="

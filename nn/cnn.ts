@@ -14,10 +14,10 @@ function im2col(
   const outW = (W - kW + 2 * pad) / stride + 1;
 
   const padded: number[] = new Array(N * C * H2 * W2).fill(0);
-  for (n in new Array(N).keys()) {
-    for (c in new Array(C).keys()) {
-      for (h in new Array(H).keys()) {
-        for (w in new Array(W).keys()) {
+  for (const n of new Array(N).keys()) {
+    for (const c of new Array(C).keys()) {
+      for (const h of new Array(H).keys()) {
+        for (const w of new Array(W).keys()) {
           const src = n * C * H * W + c * H * W + h * W + w;
           const dst = n * C * H2 * W2 + c * H2 * W2 + (h + pad) * W2 + (w + pad);
           padded[dst] = data[src];
@@ -136,28 +136,29 @@ export class Conv2d {
     const xCol = im2col(x.data, N, C, H, W, this.kernel_size, this.kernel_size, this.stride, this.padding);
     const wRow = this.weight.data; // [OC, IC*KH*KW]
     const kPerOC = this.in_channels * this.kernel_size * this.kernel_size;
-    const colOutH = outH * outW;
-    const outData: number[] = new Array(N * this.out_channels * outH * outW).fill(0);
+    const OH_OW = outH * outW;
+    const N_outH_outW = N * OH_OW;
+    const outData: number[] = new Array(N * this.out_channels * OH_OW).fill(0);
 
-    for (let n = 0; n < N; n++) {
-      for (let oc = 0; oc < this.out_channels; oc++) {
-        for (let oh = 0; oh < outH; oh++) {
-          for (let ow = 0; ow < outW; ow++) {
-            let sum = 0;
-            for (let ic = 0; ic < this.in_channels; ic++) {
-              const kh0 = 0, kw0 = 0;
-              for (let kh = kh0; kh < this.kernel_size; kh++) {
-                for (let kw = kw0; kw < this.kernel_size; kw++) {
-                  const colRow = ic * this.kernel_size * this.kernel_size + kh * this.kernel_size + kw;
-                  const colCol = (n * this.in_channels + ic) * colOutH * this.kernel_size * this.kernel_size
-                               + colRow * colOutH
-                               + oh * outW + ow;
-                  sum += wRow[oc * kPerOC + colRow] * (xCol[colCol] ?? 0);
-                }
-              }
-            }
-            if (this.bias) sum += this.bias.data[oc];
-            outData[(n * this.out_channels + oc) * outH * outW + oh * outW + ow] = sum;
+    for (let oc = 0; oc < this.out_channels; oc++) {
+      const oc_offset = oc * kPerOC;
+      for (let colRow = 0; colRow < kPerOC; colRow++) {
+        const wVal = wRow[oc_offset + colRow];
+        const colRow_offset = colRow * N_outH_outW;
+        for (let n = 0; n < N; n++) {
+          const n_col_offset = n * OH_OW;
+          const n_out_offset = (n * this.out_channels + oc) * OH_OW;
+          for (let spatial = 0; spatial < OH_OW; spatial++) {
+            outData[n_out_offset + spatial] += wVal * xCol[colRow_offset + n_col_offset + spatial];
+          }
+        }
+      }
+      if (this.bias) {
+        const bVal = this.bias.data[oc];
+        for (let n = 0; n < N; n++) {
+          const n_out_offset = (n * this.out_channels + oc) * OH_OW;
+          for (let spatial = 0; spatial < OH_OW; spatial++) {
+            outData[n_out_offset + spatial] += bVal;
           }
         }
       }
@@ -169,68 +170,54 @@ export class Conv2d {
 
     result._backward = () => {
       if (x.requires_grad) {
-        const wRow = this.weight.data;
         const dout = result.grad;
-        const dxData: number[] = new Array(N * C * H * W).fill(0);
-        for (let n = 0; n < N; n++) {
-          for (let ic = 0; ic < this.in_channels; ic++) {
-            for (let kh = 0; kh < this.kernel_size; kh++) {
-              for (let kw = 0; kw < this.kernel_size; kw++) {
-                for (let oh = 0; oh < outH; oh++) {
-                  for (let ow = 0; ow < outW; ow++) {
-                    const colRow = ic * this.kernel_size * this.kernel_size + kh * this.kernel_size + kw;
-                    let gradVal = 0;
-                    for (let oc = 0; oc < this.out_channels; oc++) {
-                      const doutIdx = (n * this.out_channels + oc) * outH * outW + oh * outW + ow;
-                      gradVal += (dout[doutIdx] ?? 0) * wRow[oc * kPerOC + colRow];
-                    }
-                    const colCol = (n * this.in_channels + ic) * colOutH * this.kernel_size * this.kernel_size
-                                 + colRow * colOutH
-                                 + oh * outW + ow;
-                    dxData[n * C * H * W + ic * H * W + (oh * this.stride + kh) * W + (ow * this.stride + kw)] += gradVal;
-                  }
-                }
+        const dcol: number[] = new Array(kPerOC * N_outH_outW).fill(0);
+        for (let oc = 0; oc < this.out_channels; oc++) {
+          const oc_offset = oc * kPerOC;
+          for (let colRow = 0; colRow < kPerOC; colRow++) {
+            const wVal = wRow[oc_offset + colRow];
+            const colRow_offset = colRow * N_outH_outW;
+            for (let n = 0; n < N; n++) {
+              const n_col_offset = n * OH_OW;
+              const n_out_offset = (n * this.out_channels + oc) * OH_OW;
+              for (let spatial = 0; spatial < OH_OW; spatial++) {
+                dcol[colRow_offset + n_col_offset + spatial] += wVal * dout[n_out_offset + spatial];
               }
             }
           }
         }
+        const dxData = col2im(dcol, N, C, H, W, this.kernel_size, this.kernel_size, this.stride, this.padding);
         for (let i = 0; i < x.grad.length; i++) x.grad[i] += dxData[i];
       }
       if (this.weight.requires_grad) {
         const dout = result.grad;
-        const dw: number[] = new Array(this.weight.data.length).fill(0);
-        for (let n = 0; n < N; n++) {
-          for (let oc = 0; oc < this.out_channels; oc++) {
-            for (let oh = 0; oh < outH; oh++) {
-              for (let ow = 0; ow < outW; ow++) {
-                for (let ic = 0; ic < this.in_channels; ic++) {
-                  for (let kh = 0; kh < this.kernel_size; kh++) {
-                    for (let kw = 0; kw < this.kernel_size; kw++) {
-                      const colRow = ic * this.kernel_size * this.kernel_size + kh * this.kernel_size + kw;
-                      const colCol = (n * this.in_channels + ic) * colOutH * this.kernel_size * this.kernel_size
-                                   + colRow * colOutH
-                                   + oh * outW + ow;
-                      const wIdx = oc * kPerOC + colRow;
-                      dw[wIdx] += (dout[(n * this.out_channels + oc) * outH * outW + oh * outW + ow] ?? 0) * (xCol[colCol] ?? 0);
-                    }
-                  }
-                }
+        for (let oc = 0; oc < this.out_channels; oc++) {
+          const oc_offset = oc * kPerOC;
+          for (let colRow = 0; colRow < kPerOC; colRow++) {
+            let sum = 0;
+            const colRow_offset = colRow * N_outH_outW;
+            for (let n = 0; n < N; n++) {
+              const n_col_offset = n * OH_OW;
+              const n_out_offset = (n * this.out_channels + oc) * OH_OW;
+              for (let spatial = 0; spatial < OH_OW; spatial++) {
+                sum += dout[n_out_offset + spatial] * xCol[colRow_offset + n_col_offset + spatial];
               }
             }
+            this.weight.grad[oc_offset + colRow] += sum;
           }
         }
-        for (let i = 0; i < this.weight.grad.length; i++) this.weight.grad[i] += dw[i];
       }
       if (this.bias?.requires_grad) {
         const dout = result.grad;
-        for (let n = 0; n < N; n++) {
-          for (let oc = 0; oc < this.out_channels; oc++) {
-            for (let oh = 0; oh < outH; oh++) {
-              for (let ow = 0; ow < outW; ow++) {
-                this.bias!.grad[oc] += dout[(n * this.out_channels + oc) * outH * outW + oh * outW + ow] ?? 0;
-              }
+        for (let oc = 0; oc < this.out_channels; oc++) {
+          let sum = 0;
+          for (let n = 0; n < N; n++) {
+            const n_out_offset = (n * this.out_channels + oc) * OH_OW;
+            for (let spatial = 0; spatial < OH_OW; spatial++) {
+              sum += dout[n_out_offset + spatial];
             }
           }
+          this.bias!.grad[oc] += sum;
         }
       }
     };
