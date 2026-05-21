@@ -42,3 +42,10 @@ path = "nn/chargpt_demo.rs"
 [[bin]]
 name = "world_cartpole_render_test"
 path = "world/render/test_ws.rs"
+[[bin]]
+name = "mnist_train"
+path = "nn/mnist/train.rs"
+
+[[bin]]
+name = "mnist_predict"
+path = "nn/mnist/predict.rs"

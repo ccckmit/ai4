@@ -13,32 +13,32 @@ fn test_conv2d_creation() {
 #[test]
 fn test_conv2d_forward() {
     let conv = Conv2d::new(3, 8, 3, 1, 0, true);
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![0.0f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
     let out = conv.forward(&x);
     let expected_h = (10 - 3) / 1 + 1;
     let expected_w = (10 - 3) / 1 + 1;
-    assert_eq!(out.shape, vec![2, 8, expected_h, expected_w]);
+    assert_eq!(out.shape(), vec![2, 8, expected_h, expected_w]);
 }
 
 #[test]
 fn test_conv2d_with_padding() {
     let conv = Conv2d::new(3, 8, 3, 1, 1, true);
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![0.0f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
     let out = conv.forward(&x);
-    assert_eq!(out.shape, vec![2, 8, 10, 10]);
+    assert_eq!(out.shape(), vec![2, 8, 10, 10]);
 }
 
 #[test]
 fn test_conv2d_with_stride() {
     let conv = Conv2d::new(3, 8, 3, 2, 0, true);
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![0.0f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
     let out = conv.forward(&x);
     let expected_h = (10 - 3) / 2 + 1;
     let expected_w = (10 - 3) / 2 + 1;
-    assert_eq!(out.shape, vec![2, 8, expected_h, expected_w]);
+    assert_eq!(out.shape(), vec![2, 8, expected_h, expected_w]);
 }
 
 #[test]
@@ -50,10 +50,10 @@ fn test_conv2d_no_bias() {
 #[test]
 fn test_conv2d_single_channel() {
     let conv = Conv2d::new(1, 1, 3, 1, 0, false);
-    let data = vec![0.0f32; 1 * 1 * 10 * 10];
+    let data = vec![0.0f64; 1 * 1 * 10 * 10];
     let x = Tensor::new(data, vec![1, 1, 10, 10], false);
     let out = conv.forward(&x);
-    assert_eq!(out.shape, vec![1, 1, 8, 8]);
+    assert_eq!(out.shape(), vec![1, 1, 8, 8]);
 }
 
 #[test]
@@ -72,20 +72,20 @@ fn test_maxpool2d_custom_stride() {
 #[test]
 fn test_maxpool2d_forward() {
     let pool = MaxPool2d::new(2, None);
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![0.0f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
     let out = pool.forward(&x);
-    assert_eq!(out.shape, vec![2, 3, 5, 5]);
+    assert_eq!(out.shape(), vec![2, 3, 5, 5]);
 }
 
 #[test]
 fn test_maxpool2d_odd_input() {
     let pool = MaxPool2d::new(3, Some(2));
-    let data = vec![0.0f32; 1 * 1 * 7 * 7];
+    let data = vec![0.0f64; 1 * 1 * 7 * 7];
     let x = Tensor::new(data, vec![1, 1, 7, 7], false);
     let out = pool.forward(&x);
     let expected = (7 - 3) / 2 + 1;
-    assert_eq!(out.shape, vec![1, 1, expected, expected]);
+    assert_eq!(out.shape(), vec![1, 1, expected, expected]);
 }
 
 #[test]
@@ -98,28 +98,28 @@ fn test_avgpool2d_creation() {
 #[test]
 fn test_avgpool2d_forward() {
     let pool = AvgPool2d::new(2, None);
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![1.0f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
     let out = pool.forward(&x);
-    assert_eq!(out.shape, vec![2, 3, 5, 5]);
+    assert_eq!(out.shape(), vec![2, 3, 5, 5]);
 }
 
 #[test]
 fn test_flatten_creation() {
     let flat = Flatten::new();
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![0.0f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
     let out = flat.forward(&x);
-    assert_eq!(out.shape, vec![2, 300]);
+    assert_eq!(out.shape(), vec![2, 300]);
 }
 
 #[test]
 fn test_flatten_single_batch() {
     let flat = Flatten::new();
-    let data = vec![0.0f32; 1 * 3 * 10 * 10];
+    let data = vec![0.0f64; 1 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![1, 3, 10, 10], false);
     let out = flat.forward(&x);
-    assert_eq!(out.shape, vec![1, 300]);
+    assert_eq!(out.shape(), vec![1, 300]);
 }
 
 #[test]
@@ -132,10 +132,10 @@ fn test_batchnorm2d_creation() {
 #[test]
 fn test_batchnorm2d_forward() {
     let bn = BatchNorm2d::new(8, 1e-5, 0.1);
-    let data = vec![0.0f32; 4 * 8 * 10 * 10];
+    let data = vec![0.0f64; 4 * 8 * 10 * 10];
     let x = Tensor::new(data, vec![4, 8, 10, 10], false);
     let out = bn.forward(&x);
-    assert_eq!(out.shape, vec![4, 8, 10, 10]);
+    assert_eq!(out.shape(), vec![4, 8, 10, 10]);
 }
 
 #[test]
@@ -171,13 +171,13 @@ fn test_dropout2d_eval_mode() {
 fn test_conv_relu_pool() {
     let conv = Conv2d::new(3, 8, 3, 1, 1, true);
     let pool = MaxPool2d::new(2, None);
-    let data = vec![0.0f32; 2 * 3 * 10 * 10];
+    let data = vec![0.5f64; 2 * 3 * 10 * 10];
     let x = Tensor::new(data, vec![2, 3, 10, 10], false);
 
     let out = conv.forward(&x);
     let out = out.relu();
     let out = pool.forward(&out);
-    assert_eq!(out.shape, vec![2, 8, 5, 5]);
+    assert_eq!(out.shape(), vec![2, 8, 5, 5]);
 }
 
 #[test]
@@ -188,19 +188,19 @@ fn test_simple_cnn() {
     let pool2 = MaxPool2d::new(2, None);
     let flat = Flatten::new();
 
-    let data = vec![0.0f32; 4 * 1 * 28 * 28];
+    let data = vec![0.0f64; 4 * 1 * 28 * 28];
     let x = Tensor::new(data, vec![4, 1, 28, 28], false);
 
     let out = conv1.forward(&x);
     let out = out.relu();
     let out = pool1.forward(&out);
-    assert_eq!(out.shape, vec![4, 8, 14, 14]);
+    assert_eq!(out.shape(), vec![4, 8, 14, 14]);
 
     let out = conv2.forward(&out);
     let out = out.relu();
     let out = pool2.forward(&out);
-    assert_eq!(out.shape, vec![4, 16, 7, 7]);
+    assert_eq!(out.shape(), vec![4, 16, 7, 7]);
 
     let out = flat.forward(&out);
-    assert_eq!(out.shape, vec![4, 784]);
+    assert_eq!(out.shape(), vec![4, 784]);
 }
