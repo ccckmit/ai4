@@ -1,5 +1,6 @@
 //! nn/chargpt_demo.rs - CharGPT training demo
 
+#[allow(unused_imports)]
 use ai4::nn::{GPT, Adam, Tensor, Module};
 use std::collections::HashMap;
 use std::fs;

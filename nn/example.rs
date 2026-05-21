@@ -1,5 +1,6 @@
 //! nn/example.rs - Example of using neural network
 
+#[allow(unused_imports)]
 use ai4::{Tensor, Linear, Embedding, Module};
 
 fn main() {
