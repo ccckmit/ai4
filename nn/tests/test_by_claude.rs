@@ -168,7 +168,7 @@ fn test_embedding_parameters() {
 #[test]
 fn test_adam_optimizer() {
     let t = Tensor::from_vec(vec![1.0, 2.0, 3.0], true);
-    let mut optim = Adam::new(vec![t.clone()], 0.01, (0.9, 0.999), 1e-8);
+    let mut optim = Adam::new(vec![&t], 0.01, (0.9, 0.999), 1e-8);
     optim.zero_grad();
     optim.step();
 }

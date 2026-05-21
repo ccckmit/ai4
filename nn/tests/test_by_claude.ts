@@ -1,7 +1,5 @@
 /**
  * tests/test_by_claude.ts - Lightweight smoke tests for nn module.
- * Based on test_by_claude.py but simplified to avoid gradient checking
- * which exposes underlying Tensor implementation issues.
  */
 import { Tensor, Module, Linear, Embedding, RMSNorm, Adam } from '../index';
 
@@ -21,8 +19,9 @@ function assertAlmostEq(a: number, b: number, tol = ATOL) {
 
 function testTensorCreation() {
   const t = Tensor.from([[1, 2], [3, 4]]);
-  assert(t.data.length === 2, 'should have 2 rows');
-  assert(t.data[0].length === 2, 'should have 2 columns');
+  assert(t.shape[0] === 2, 'should have 2 rows');
+  assert(t.shape[1] === 2, 'should have 2 cols');
+  assert(t.data.length === 4, 'should have 4 elements');
   console.log('  [PASS] test_tensor_creation');
 }
 
@@ -30,8 +29,8 @@ function testAdd() {
   const a = Tensor.from([[1.0, 2.0]]);
   const b = Tensor.from([[3.0, 4.0]]);
   const out = a.add(b);
-  assertAlmostEq(out.data[0][0], 4.0);
-  assertAlmostEq(out.data[0][1], 6.0);
+  assertAlmostEq(out.data[0], 4.0);
+  assertAlmostEq(out.data[1], 6.0);
   console.log('  [PASS] test_add');
 }
 
@@ -39,8 +38,8 @@ function testMul() {
   const a = Tensor.from([[2.0, 3.0]]);
   const b = Tensor.from([[4.0, 5.0]]);
   const out = a.mul(b);
-  assertAlmostEq(out.data[0][0], 8.0);
-  assertAlmostEq(out.data[0][1], 15.0);
+  assertAlmostEq(out.data[0], 8.0);
+  assertAlmostEq(out.data[1], 15.0);
   console.log('  [PASS] test_mul');
 }
 
@@ -48,36 +47,36 @@ function testMatmul() {
   const a = Tensor.from([[1, 2], [3, 4]]);
   const b = Tensor.from([[1, 0], [0, 1]]);
   const out = a.matmul(b);
-  assertAlmostEq(out.data[0][0], 1);
-  assertAlmostEq(out.data[0][1], 2);
-  assertAlmostEq(out.data[1][0], 3);
-  assertAlmostEq(out.data[1][1], 4);
+  assertAlmostEq(out.data[0], 1);
+  assertAlmostEq(out.data[1], 2);
+  assertAlmostEq(out.data[2], 3);
+  assertAlmostEq(out.data[3], 4);
   console.log('  [PASS] test_matmul');
 }
 
 function testRelu() {
   const x = Tensor.from([[-1, 0, 2]]);
   const out = x.relu();
-  assertAlmostEq(out.data[0][0], 0);
-  assertAlmostEq(out.data[0][1], 0);
-  assertAlmostEq(out.data[0][2], 2);
+  assertAlmostEq(out.data[0], 0);
+  assertAlmostEq(out.data[1], 0);
+  assertAlmostEq(out.data[2], 2);
   console.log('  [PASS] test_relu');
 }
 
 function testSum() {
   const x = Tensor.from([[1, 2], [3, 4]]);
   const out = x.sum();
-  assertAlmostEq(out.data[0][0], 10);
+  assertAlmostEq(out.data[0], 10);
   console.log('  [PASS] test_sum');
 }
 
 function testTranspose() {
   const x = Tensor.from([[1, 2], [3, 4]]);
   const out = x.transpose();
-  assertAlmostEq(out.data[0][0], 1);
-  assertAlmostEq(out.data[0][1], 3);
-  assertAlmostEq(out.data[1][0], 2);
-  assertAlmostEq(out.data[1][1], 4);
+  assertAlmostEq(out.data[0], 1);
+  assertAlmostEq(out.data[1], 3);
+  assertAlmostEq(out.data[2], 2);
+  assertAlmostEq(out.data[3], 4);
   console.log('  [PASS] test_transpose');
 }
 
@@ -118,8 +117,9 @@ function testEmbeddingForward() {
   const emb = new Embedding(10, 4);
   const indices = Tensor.from([[1, 3, 5]]);
   const out = emb.forward(indices);
-  assert(out.shape[0] === 3, 'seq_len should be 3');
-  assert(out.shape[1] === 4, 'embedding_dim should be 4');
+  assert(out.shape[0] === 1, 'batch should be 1');
+  assert(out.shape[1] === 3, 'seq_len should be 3');
+  assert(out.shape[2] === 4, 'embedding_dim should be 4');
   console.log('  [PASS] test_embedding_forward');
 }
 
@@ -142,23 +142,22 @@ function testRMSNormForward() {
 
 function testAdamStep() {
   const p = Tensor.from([[1, 2, 3]], true);
-  p.grad = [[0.1, 0.2, 0.3]];
+  p.grad = [0.1, 0.2, 0.3];
   const optim = new Adam([p], 0.01);
-  const oldData = p.data[0].slice();
+  const oldData = [...p.data];
   optim.step();
-  const newData = p.data[0];
-  const changed = oldData.some((v, i) => v !== newData[i]);
+  const changed = oldData.some((v, i) => v !== p.data[i]);
   assert(changed, 'data should change after step');
   console.log('  [PASS] test_adam_step');
 }
 
 function testAdamZeroGrad() {
   const p = Tensor.from([[1, 2]], true);
-  p.grad = [[1, 1]];
+  p.grad = [1, 1];
   const optim = new Adam([p], 0.01);
   optim.zeroGrad();
-  assert(p.grad[0][0] === 0, 'grad should be zero');
-  assert(p.grad[0][1] === 0, 'grad should be zero');
+  assert(p.grad[0] === 0, 'grad should be zero');
+  assert(p.grad[1] === 0, 'grad should be zero');
   console.log('  [PASS] test_adam_zero_grad');
 }
 
@@ -191,16 +190,16 @@ function testBackwardPass() {
   const y = x.mul(x);
   const loss = y.sum();
   loss.backward();
-  assert(x.grad[0][0] !== 0, 'grad should be non-zero');
+  assert(x.grad[0] !== 0, 'grad should be non-zero');
   console.log('  [PASS] test_backward_pass');
 }
 
 function testZeroGrad() {
   const x = Tensor.from([[3]], true);
   x.mul(x).sum().backward();
-  const g1 = x.grad[0][0];
+  const g1 = x.grad[0];
   x.mul(x).sum().backward();
-  assertAlmostEq(x.grad[0][0], 2 * g1, 0.01);
+  assertAlmostEq(x.grad[0], 2 * g1, 0.01);
   console.log('  [PASS] test_zero_grad_accumulates');
 }
 
@@ -209,7 +208,6 @@ function testZeroGrad() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const tests = [
-  // Tensor ops
   testTensorCreation,
   testAdd,
   testMul,
@@ -217,18 +215,14 @@ const tests = [
   testRelu,
   testSum,
   testTranspose,
-  // Layers
   testLinearForwardNoBias,
   testLinearForwardWithBias,
   testLinearParameters,
   testEmbeddingForward,
   testRMSNormForward,
-  // Optimizer
   testAdamStep,
   testAdamZeroGrad,
-  // Module
   testModuleParameters,
-  // Backward
   testBackwardPass,
   testZeroGrad,
 ];

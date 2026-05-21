@@ -183,38 +183,49 @@ impl GPT {
 
     pub fn forward_idx(&self, idx: &[usize], kv_caches: Option<Vec<(Tensor, Tensor)>>) -> (Tensor, Vec<(Tensor, Tensor)>) {
         let T = idx.len();
+        let n_embd = self.n_embd();
+        let vocab_size = self.lm_head.weight.shape[1];
         
         // Token embeddings
         let tok_emb = self.wte.embed(idx);
         
-        // Simplified positional embeddings (just add zeros)
-        let pos_emb_data = vec![0.0; T * self.n_embd()];
-        let pos_emb = Tensor::new(pos_emb_data, vec![T, self.n_embd()], false);
-        
-        let x = tok_emb.add(&pos_emb);
-        
-        // Reshape to 3D [1, T, n_embd] for transformer blocks
-        let x_3d = x.reshape(vec![1, T, self.n_embd()]);
-        
-        // Pass through Transformer blocks
+        // Process each token independently through all blocks,
+        // since Linear/MLP don't handle 3D batched inputs
+        let emb_data = tok_emb.data.borrow().clone();
+        let mut all_logits = Vec::with_capacity(T * vocab_size);
         let mut new_caches = Vec::new();
-        for block in &self.blocks {
-            let layer_cache = kv_caches.as_ref().map(|c| (&c[0].0, &c[0].1));
-            let (out, cache) = block.forward_raw(&x_3d, layer_cache);
-            new_caches.push(cache);
+        
+        let mut first = true;
+        for t in 0..T {
+            let token_input = Tensor::new(
+                emb_data[t * n_embd..(t + 1) * n_embd].to_vec(),
+                vec![1, 1, n_embd],
+                false,
+            );
+            
+            let mut token_t = token_input;
+            let mut token_caches = Vec::new();
+            for (i, block) in self.blocks.iter().enumerate() {
+                let layer_cache = kv_caches.as_ref().and_then(|c| {
+                    if i < c.len() { Some((&c[i].0, &c[i].1)) } else { None }
+                });
+                let (out, cache) = block.forward_raw(&token_t, layer_cache);
+                token_t = out;
+                token_caches.push(cache);
+            }
+            
+            if first {
+                new_caches = token_caches;
+                first = false;
+            }
+            
+            let x_norm = self.ln_f.forward(&token_t);
+            let x_1d = x_norm.reshape(vec![n_embd]);
+            let logit = self.lm_head.forward(&x_1d);
+            all_logits.extend(logit.data.borrow().iter());
         }
         
-        // Final normalization
-        let x_norm = self.ln_f.forward(&x_3d);
-        
-        // Project to vocabulary
-        let logits = self.lm_head.forward(&x_norm);
-        
-        // Reshape logits back to 2D [T, vocab_size]
-        let vocab_size = self.lm_head.weight.shape[0];
-        let logits_2d = logits.reshape(vec![T, vocab_size]);
-        
-        (logits_2d, new_caches)
+        (Tensor::new(all_logits, vec![T, vocab_size], false), new_caches)
     }
     
     fn n_embd(&self) -> usize {

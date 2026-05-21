@@ -128,40 +128,42 @@ export class Tensor {
     return out;
   }
 
-  transpose(ax1: number, ax2: number): Tensor {
-    const strides = this.strides();
+  transpose(ax1 = 0, ax2 = 1): Tensor {
     const n = this.shape.length;
-    const size = this.data.length;
-
     const newShape = [...this.shape];
     [newShape[ax1], newShape[ax2]] = [newShape[ax2], newShape[ax1]];
 
+    const strides = this.strides();
     const newStrides: number[] = [];
     newStrides[n - 1] = 1;
     for (let i = n - 2; i >= 0; i--) {
       newStrides[i] = newStrides[i + 1] * newShape[i + 1];
     }
 
-    const outData: number[] = new Array(size);
-    for (let i = 0; i < size; i++) {
-      let rem = i;
-      const srcIdx: number[] = [];
-      for (let d = n - 1; d >= 0; d--) {
-        srcIdx.unshift(Math.floor(rem / strides[d]));
-        rem %= strides[d];
+    const outData: number[] = new Array(this.data.length);
+    for (let flat = 0; flat < this.data.length; flat++) {
+      const idx: number[] = [];
+      let rem = flat;
+      for (let d = 0; d < n; d++) {
+        idx.push(Math.floor(rem / strides[d]));
+        rem = rem % strides[d];
       }
-      const dstIdx = [...srcIdx];
-      [dstIdx[ax1], dstIdx[ax2]] = [dstIdx[ax2], dstIdx[ax1]];
-      let outIdx = 0;
-      for (let d = 0; d < n; d++) outIdx += dstIdx[d] * newStrides[d];
-      outData[outIdx] = this.data[i];
+
+      const newIdx = [...idx];
+      [newIdx[ax1], newIdx[ax2]] = [newIdx[ax2], newIdx[ax1]];
+
+      let newFlat = 0;
+      for (let d = 0; d < n; d++) {
+        newFlat += newIdx[d] * newStrides[d];
+      }
+      outData[newFlat] = this.data[flat];
     }
 
     const result = new Tensor(outData, newShape, this.requires_grad);
     result._prev = [this];
     result._backward = () => {
       if (this.requires_grad) {
-        for (let i = 0; i < size; i++) this.grad[i] += result.grad[i];
+        for (let i = 0; i < this.data.length; i++) this.grad[i] += result.grad[i];
       }
     };
     return result;

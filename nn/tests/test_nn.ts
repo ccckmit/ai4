@@ -45,8 +45,9 @@ function testEmbedding() {
   const embed = new Embedding(10, 4);
   const indices = Tensor.from([[1, 3, 5, 3, 1]]);
   const out = embed.forward(indices);
-  assert(out.shape[0] === 5, `expected seq_len=5, got ${out.shape[0]}`);
-  assert(out.shape[1] === 4, `expected embedding_dim=4, got ${out.shape[1]}`);
+  assert(out.shape[0] === 1, `expected batch=1, got ${out.shape[0]}`);
+  assert(out.shape[1] === 5, `expected seq_len=5, got ${out.shape[1]}`);
+  assert(out.shape[2] === 4, `expected embedding_dim=4, got ${out.shape[2]}`);
   console.log('  [PASS] Embedding');
 }
 
@@ -80,15 +81,15 @@ function testRMSNormBackward() {
 
 function testAdamOptimizer() {
   const p = Tensor.from([[1, 2, 3]], true);
-  p.grad = [[0.1, 0.2, 0.3]];
+  p.grad = [0.1, 0.2, 0.3];
   const optim = new Adam([p], 0.01);
-  const oldData = p.data[0].slice();
+  const oldData = [...p.data];
   optim.step();
-  const newData = p.data[0];
+  const newData = p.data;
   const dataChanged = oldData.some((v, i) => v !== newData[i]);
   assert(dataChanged, 'expected data to change after step');
   optim.zeroGrad();
-  const gradZero = p.grad[0].every(v => v === 0);
+  const gradZero = p.grad.every(v => v === 0);
   assert(gradZero, 'expected grad to be zero after zeroGrad');
   console.log('  [PASS] Adam optimizer');
 }
