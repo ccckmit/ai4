@@ -1,4 +1,4 @@
-//! nn/tests/test_by_claude.rs - 綜合梯度檢查測試。
+//! nn/tests/test_by_claude.rs - Comprehensive gradient checking tests.
 
 use crate::nn::{Tensor, Module, Linear, Embedding, RMSNorm, cat};
 use std::collections::HashMap;
@@ -9,8 +9,9 @@ const EPS: f32 = 1e-3;
 
 // 輔助函式：產生隨機 Tensor
 fn rand_tensor(shape: &[usize]) -> Tensor {
+    // 這裡使用隨機數填充，若框架無 randn，可用常態分佈或基礎隨機數替代
     let size: usize = shape.iter().product();
-    let data: Vec<f32> = (0..size).map(|i| ((i as f32 * 0.1).sin())).collect();
+    let data: Vec<f32> = (0..size).map(|i| ((i as f32 * 0.1).sin())).collect(); // 穩定的偽隨機
     Tensor::new(data, shape.to_vec(), true)
 }
 
@@ -26,20 +27,23 @@ fn numerical_grad_check(x: &mut Tensor, targets: &[usize]) -> Vec<f32> {
         {
             let mut data = x.data.borrow_mut();
             let orig = data[i];
-
+            
+            // 正向擾動
             data[i] = orig + EPS;
-            drop(data);
-
+            drop(data); // 提前釋放借用避免 cross_entropy 內部衝突
+            
             let loss_p = x.cross_entropy(targets);
             fp = loss_p.data.borrow()[0];
 
+            // 負向擾動
             let mut data = x.data.borrow_mut();
             data[i] = orig - EPS;
             drop(data);
-
+            
             let loss_m = x.cross_entropy(targets);
             fm = loss_m.data.borrow()[0];
 
+            // 還原數據
             let mut data = x.data.borrow_mut();
             data[i] = orig;
         }
@@ -230,12 +234,13 @@ fn test_zero_grad_resets() {
 fn test_grad_accumulates() {
     let mut x = Tensor::from_vec(vec![3.0], true);
     x.zero_grad();
-
+    
     let out = x.mul(&x);
     let s1 = out.sum();
     s1.backward();
     let g1 = x.grad.borrow().clone();
 
+    // 第二次 backward 應該累積梯度
     let out2 = x.mul(&x);
     let s2 = out2.sum();
     s2.backward();
@@ -250,9 +255,11 @@ fn test_grad_accumulates() {
 
 #[test]
 fn test_cross_entropy_forward_shape() {
+    // 將 3D [2, 3, 5] 拍平成 2D [6, 5] 符合 Cross Entropy 的矩陣規格
     let logits = rand_tensor(&[6, 5]);
     let targets = vec![1, 2, 0, 3, 4, 1];
     let loss = logits.cross_entropy(&targets);
+    // 損失通常是純量標量，其 Shape 長度為 0 或是 1 (vec![1])
     assert!(loss.shape.is_empty() || loss.shape == vec![1]);
 }
 
@@ -267,6 +274,7 @@ fn test_cross_entropy_forward_nonneg() {
 
 #[test]
 fn test_cross_entropy_perfect_prediction() {
+    // 1 個樣本，3 個類別。在索引 2 給予極高機率
     let logits = Tensor::new(vec![-50.0, -50.0, 50.0], vec![1, 3], true);
     let loss = logits.cross_entropy(&[2]);
     let data = loss.data.borrow();
@@ -277,11 +285,13 @@ fn test_cross_entropy_perfect_prediction() {
 fn test_cross_entropy_grad() {
     let targets = vec![1, 2, 0, 3, 4, 1];
     let mut logits = rand_tensor(&[6, 5]);
-
+    
+    // 反向傳播計算解析梯度
     let loss = logits.cross_entropy(&targets);
     loss.backward();
     let analytic = logits.grad.borrow().clone();
 
+    // 計算數值梯度
     let num = numerical_grad_check(&mut logits, &targets);
 
     let mut max_rel_err = 0.0f32;
@@ -307,6 +317,7 @@ fn test_cross_entropy_grad_nonzero() {
 
 #[test]
 fn test_cross_entropy_known_values() {
+    // 均等分佈的 Logits，預期 Loss 應為 ln(類別數)
     let logits = Tensor::new(vec![0.0; 5], vec![1, 5], true);
     let targets = vec![2];
     let loss = logits.cross_entropy(&targets);

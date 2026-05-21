@@ -22,3 +22,5 @@ npx tsx nn/chargpt_demo.ts
 echo ""
 echo "=== llm agent test ==="
 npx tsx llm/tests/test_agent.ts
+
+npx tsx nn/mnist/train.ts

@@ -1,4 +1,7 @@
 import { Tensor, Conv2d, MaxPool2d, Flatten, Linear, Adam, Module } from '../index';
+import { DataLoader, datasets } from '../datasets';
+import * as fs from 'fs';
+import * as path from 'path';
 
 class MNISTNet extends Module {
   conv1: Conv2d;
@@ -22,18 +25,89 @@ class MNISTNet extends Module {
 
   forward(x: Tensor): Tensor {
     let out = x.relu();
-    out = this.pool1(this.conv1(out));
+    out = this.pool1.forward(this.conv1.forward(out));
     out = out.relu();
-    out = this.pool2(this.conv2(out));
-    out = this.flatten(out);
+    out = this.pool2.forward(this.conv2.forward(out));
+    out = this.flatten.forward(out);
     out = out.relu();
-    out = this.fc1(out);
-    return this.fc2(out);
+    out = this.fc1.forward(out);
+    return this.fc2.forward(out);
   }
 }
 
 export async function train() {
-  console.log('MNIST training requires the nn/datasets.ts MNIST loader.');
-  console.log('Use the Python nn/mnist/train.py instead:');
-  console.log('  PYTHONPATH=. uv run python nn/mnist/train.py');
+  console.log('Loading MNIST dataset...');
+  const mnistClass = new datasets.MNIST('./data', true, true);
+  const rawDataset = await mnistClass.load();
+
+  const subsetSize = 1000;
+  const subsetIndices = Array.from({ length: subsetSize }, (_, i) => i);
+  const subsetData = {
+    length: () => subsetSize,
+    get: (indices: number[]) => rawDataset.get(indices.map((i) => subsetIndices[i])),
+  };
+
+  const trainLoader = new DataLoader(subsetData, 64, true);
+  console.log(`Dataset: ${subsetSize} samples`);
+
+  const model = new MNISTNet();
+  const optimizer = new Adam(model.parameters(), 0.001);
+
+  for (let epoch = 0; epoch < 5; epoch++) {
+    let total = 0;
+    let correct = 0;
+
+    for (let batchIdx = 0; batchIdx < trainLoader.length(); batchIdx++) {
+      const { xs, ys } = trainLoader.get(batchIdx);
+      const batchSize = ys.length;
+      const xData = xs.map((v) => (Array.isArray(v) ? v : [v])).flat();
+      const images = Tensor.from([xData], true);
+      images.shape = [batchSize, 1, 28, 28];
+      const labels = ys;
+
+      const logits = model.forward(images);
+      const loss = logits.cross_entropy(labels);
+
+      optimizer.zeroGrad();
+      loss.backward();
+      optimizer.step();
+
+      const logitsData = logits.data;
+      const vocabSize = logits.shape[logits.shape.length - 1];
+      const predictions: number[] = [];
+      for (let i = 0; i < batchSize; i++) {
+        const offset = i * vocabSize;
+        let maxVal = -Infinity;
+        let maxIdx = 0;
+        for (let j = 0; j < vocabSize; j++) {
+          if (logitsData[offset + j] > maxVal) {
+            maxVal = logitsData[offset + j];
+            maxIdx = j;
+          }
+        }
+        predictions.push(maxIdx);
+      }
+
+      total += batchSize;
+      for (let i = 0; i < batchSize; i++) {
+        if (predictions[i] === ys[i]) correct++;
+      }
+
+      console.log(`Epoch ${epoch + 1} Batch ${batchIdx}/${trainLoader.length()} Loss: ${loss.data[0].toFixed(4)}`);
+    }
+
+    const accuracy = (100 * correct) / total;
+    console.log(`Epoch ${epoch + 1} Accuracy: ${accuracy.toFixed(2)}%`);
+  }
+
+  const dir = path.join('.', 'nn', 'mnist');
+  fs.mkdirSync(dir, { recursive: true });
+  const params: Record<string, number[]> = {};
+  model.parameters().forEach((p, i) => {
+    params[`param_${i}`] = p.data;
+  });
+  fs.writeFileSync(path.join(dir, 'model.npy'), JSON.stringify(params));
+  console.log('Model saved to nn/mnist/model.npy');
 }
+
+train().catch(console.error);

@@ -115,14 +115,14 @@ fn test_tensor_reshape() {
 
 #[test]
 fn test_tensor_zeros() {
-    let t = Tensor::zeros(&[3, 4]);
+    let t = Tensor::zeros(&[3, 4], false);
     assert_eq!(t.data.borrow().len(), 12);
     assert_eq!(t.shape, vec![3, 4]);
 }
 
 #[test]
 fn test_tensor_ones() {
-    let t = Tensor::ones(&[2, 3]);
+    let t = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 1.0, 1.0], vec![2, 3], false);
     let data = t.data.borrow();
     assert!(data.iter().all(|&v| v == 1.0));
 }

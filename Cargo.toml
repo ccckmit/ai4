@@ -16,11 +16,8 @@ hex = "0.4"
 tungstenite = "0.21"
 
 [lib]
+name = "ai4"
 path = "lib.rs"
-
-[[bin]]
-name = "nn_example"
-path = "nn/example.rs"
 
 [[bin]]
 name = "world_frozen_lake_example"
@@ -41,10 +38,6 @@ path = "ml/examples/example.rs"
 [[bin]]
 name = "chargpt_demo"
 path = "nn/chargpt_demo.rs"
-
-[[bin]]
-name = "mnist_train"
-path = "nn/mnist/train.rs"
 
 [[bin]]
 name = "world_cartpole_render_test"

@@ -1,6 +1,5 @@
 import { execSync } from 'child_process';
 import * as fs from 'fs';
-import * as path from 'path';
 
 export class DataLoader<T = number[][]> {
   dataset: Dataset<T>;
@@ -43,9 +42,74 @@ export interface Dataset<T = number[][]> {
 export class MnistDataset implements Dataset<number[]> {
   private data: { xs: number[]; ys: number }[] = [];
 
-  constructor(private root: string, private train = true, private transform?: (x: number[]) => number[]) {}
+  constructor(
+    private root: string,
+    private train = true,
+    private transform?: (x: number[]) => number[]
+  ) {}
 
-  length(): number { return this.data.length; }
+  async load(): Promise<void> {
+    const scriptPath = '/tmp/mnist_load.py';
+    const outPath = '/tmp/mnist_out.json';
+    const pythonScript = `import sys
+import json
+import os
+os.makedirs('${this.root}', exist_ok=True)
+
+try:
+    import torch
+    from torchvision import datasets, transforms
+
+    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
+
+    if ${this.train ? 'True' : 'False'}:
+        ds = datasets.MNIST(root="${this.root}", train=True, download=True, transform=transform)
+    else:
+        ds = datasets.MNIST(root="${this.root}", train=False, download=True, transform=transform)
+
+    images = []
+    labels = []
+    for img, label in ds:
+        images.append(img.squeeze().tolist())
+        labels.append(label)
+
+    with open('${outPath}', 'w') as f:
+        json.dump({"images": images, "labels": labels}, f)
+    print("DONE")
+except Exception as e:
+    with open('${outPath}', 'w') as f:
+        json.dump({"error": str(e)}, f)
+    print("ERROR")
+`;
+    fs.writeFileSync(scriptPath, pythonScript);
+    try {
+      execSync(`python3 "${scriptPath}"`, { timeout: 300000 });
+      const content = fs.readFileSync(outPath, 'utf-8');
+      const result = JSON.parse(content);
+      if (result.error) {
+        console.error('MNIST load error:', result.error);
+        return;
+      }
+      for (let i = 0; i < result.labels.length; i++) {
+        const xs = result.images[i];
+        const ys = result.labels[i];
+        let transformedXs = xs;
+        if (this.transform) {
+          transformedXs = this.transform(xs);
+        }
+        this.data.push({ xs: transformedXs, ys });
+      }
+    } catch (e) {
+      console.error('Failed to load MNIST:', e);
+    } finally {
+      try { fs.unlinkSync(scriptPath); } catch {}
+      try { fs.unlinkSync(outPath); } catch {}
+    }
+  }
+
+  length(): number {
+    return this.data.length;
+  }
 
   get(indices: number[]): { xs: number[]; ys: number[] } {
     const xs: number[] = [];
@@ -55,49 +119,56 @@ export class MnistDataset implements Dataset<number[]> {
       xs.push(...item.xs);
       ys.push(item.ys);
     }
-    return { xs: this.transform ? this.data[indices[0]].xs.map((_, i) => this.transform!(this.data.map(d => d.xs[i]).flat()).slice(0, indices.length * 784)[i] ?? 0) : this.data[indices[0]].xs, ys };
+    return { xs, ys };
   }
 }
 
-class MNISTLoader {
-  static async load(root: string, train = true, download = true): Promise<{ images: number[]; labels: number[] }> {
-    const pythonScript = `
-import sys
-import json
+export class Compose {
+  transforms: ((x: number[]) => number[])[];
 
-try:
-    import torch
-    from torch.utils.data import DataLoader
-    from torchvision import datasets, transforms
-
-    transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize((0.5,), (0.5,))])
-
-    if ${train}:
-        ds = datasets.MNIST(root="${root}", train=True, download=${download}, transform=transform)
-    else:
-        ds = datasets.MNIST(root="${root}", train=False, download=${download}, transform=transform)
-
-    images = []
-    labels = []
-    for img, label in ds:
-        images.append(img.squeeze().tolist())
-        labels.append(label)
-
-    print(json.dumps({"images": images, "labels": labels}))
-except Exception as e:
-    print(json.dumps({"error": str(e)}))
-`;
-    try {
-      const out = execSync(`cd "${root}" && python3 -c "${pythonScript.replace(/"/g, '\\"').replace(/\n/g, ' ')}"`, { timeout: 60000 });
-      return JSON.parse(out.toString());
-    } catch (e) {
-      return { images: [], labels: [] };
-    }
+  constructor(transforms: ((x: number[]) => number[])[]) {
+    this.transforms = transforms;
   }
+
+  __call__(x: number[]): number[] {
+    let result = x;
+    for (const t of this.transforms) {
+      result = t(result);
+    }
+    return result;
+  }
+}
+
+export function ToTensor(): (x: number[] | number[][]) => number[] {
+  return (x) => (Array.isArray(x[0]) ? (x as number[][]).flat() : x as number[]);
+}
+
+export function Normalize(mean: number[], std: number[]): (x: number[]) => number[] {
+  return (x: number[]) => x.map((v, i) => (v - mean[i % mean.length]) / std[i % std.length]);
 }
 
 export const datasets = {
   MNIST: class {
-    constructor(private root: string, train = true, download = true) {}
+    private dataset: MnistDataset;
+
+    constructor(root: string, train = true, download = true) {
+      const transforms: ((x: number[]) => number[])[] = [
+        ToTensor(),
+        Normalize([0.5], [0.5]),
+      ];
+      const composed = (x: number[]) => {
+        let result = x;
+        for (const t of transforms) {
+          result = t(result);
+        }
+        return result;
+      };
+      this.dataset = new MnistDataset(root, train, composed);
+    }
+
+    async load(): Promise<MnistDataset> {
+      await this.dataset.load();
+      return this.dataset;
+    }
   }
 };
