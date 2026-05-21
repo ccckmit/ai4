@@ -65,9 +65,8 @@ export class CausalSelfAttention extends Module {
   }
 }
 
-function gelu(x: Tensor): Tensor {
-  const inner = x.mul(0.797885).add(x.pow(3).mul(0.044715));
-  return x.mul(inner.tanh().add(1).mul(0.5));
+function relu(x: Tensor): Tensor {
+  return x.relu();
 }
 
 export class TransformerBlock extends Module {
@@ -90,7 +89,7 @@ export class TransformerBlock extends Module {
     const a = this.attn.forward(this.ln1.forward(x), kv_cache);
     const h = x.add(a.out);
     const h2 = this.ln2.forward(h);
-    const mlp_out = this.mlp_fc2.forward(gelu(this.mlp_fc1.forward(h2)));
+    const mlp_out = this.mlp_fc2.forward(relu(this.mlp_fc1.forward(h2)));
     return { out: h.add(mlp_out), cache: a.cache };
   }
 }

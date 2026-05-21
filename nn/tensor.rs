@@ -1,60 +1,52 @@
-//! nn/tensor.rs
-//! Tensor with automatic differentiation (autograd).
-//! Records operation history to support backpropagation through a computation graph.
-
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use rand::SeedableRng;
 
-pub struct Tensor {
-    pub data: Rc<RefCell<Vec<f32>>>,
-    pub grad: Rc<RefCell<Vec<f32>>>,
+// 使用 AtomicUsize 替代 unsafe 的 static mut，確保執行緒安全並產生唯一 ID
+static TENSOR_ID_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+/// 內部的資料結構，儲存真正的數值、梯度與計算圖關聯
+pub struct TensorInner {
+    pub id: usize,
+    pub data: Vec<f32>,
+    pub grad: Vec<f32>,
     pub shape: Vec<usize>,
     pub requires_grad: bool,
     pub _backward: Option<Box<dyn Fn()>>,
-    pub _prev: HashSet<usize>,
-    pub id: usize,
+    pub _prev: Vec<Tensor>, // 直接儲存父節點的引用，不再依賴全域 Registry
 }
 
-impl Clone for Tensor {
-    fn clone(&self) -> Tensor {
-        Tensor {
-            data: self.data.clone(),
-            grad: self.grad.clone(),
-            shape: self.shape.clone(),
-            requires_grad: self.requires_grad,
-            _backward: None,
-            _prev: self._prev.clone(),
-            id: self.id,
-        }
-    }
-}
-
-static mut TENSOR_ID: usize = 0;
-
-fn next_id() -> usize {
-    unsafe {
-        TENSOR_ID += 1;
-        TENSOR_ID
-    }
+/// 外部的包裝，這是一個輕量級指標 (Handle)，Clone 只會複製指標而不會複製資料
+#[derive(Clone)]
+pub struct Tensor {
+    inner: Rc<RefCell<TensorInner>>,
 }
 
 impl Tensor {
+    /// 基礎建構函數
     pub fn new(data: Vec<f32>, shape: Vec<usize>, requires_grad: bool) -> Self {
-        let grad = vec![0.0; data.len()];
-        let id = next_id();
-        
-        Tensor {
-            data: Rc::new(RefCell::new(data)),
-            grad: Rc::new(RefCell::new(grad)),
-            shape,
-            requires_grad,
-            _backward: None,
-            _prev: HashSet::new(),
-            id,
+        let len = data.len();
+        let expected_len: usize = shape.iter().product();
+        assert_eq!(len, expected_len, "Data length must match shape product");
+
+        Self {
+            inner: Rc::new(RefCell::new(TensorInner {
+                id: TENSOR_ID_COUNTER.fetch_add(1, Ordering::SeqCst),
+                data,
+                grad: vec![0.0; len],
+                shape,
+                requires_grad,
+                _backward: None,
+                _prev: Vec::new(),
+            })),
         }
+    }
+
+    pub fn id(&self) -> usize {
+        self.inner.borrow().id
     }
 
     pub fn from_vec(data: Vec<f32>, requires_grad: bool) -> Self {
@@ -62,394 +54,315 @@ impl Tensor {
         Self::new(data, shape, requires_grad)
     }
 
-    pub fn zeros(shape: &[usize]) -> Self {
+    pub fn zeros(shape: &[usize], requires_grad: bool) -> Self {
         let size = shape.iter().product::<usize>();
-        Self::new(vec![0.0; size], shape.to_vec(), false)
+        Self::new(vec![0.0; size], shape.to_vec(), requires_grad)
     }
 
-    pub fn ones(shape: &[usize]) -> Self {
-        let size = shape.iter().product::<usize>();
-        Self::new(vec![1.0; size], shape.to_vec(), false)
-    }
-
-    pub fn randn(shape: &[usize]) -> Self {
+    pub fn randn(shape: &[usize], requires_grad: bool) -> Self {
         use rand::Rng;
         let mut rng = rand::rngs::StdRng::from_entropy();
         let size = shape.iter().product::<usize>();
-        let data: Vec<f32> = (0..size).map(|_| rng.sample(rand_distr::Normal::new(0.0, 1.0).unwrap()) as f32).collect();
-        Self::new(data, shape.to_vec(), false)
+        let data: Vec<f32> = (0..size)
+            .map(|_| rng.sample(rand_distr::Normal::new(0.0, 1.0).unwrap()) as f32)
+            .collect();
+        Self::new(data, shape.to_vec(), requires_grad)
     }
 
-    pub fn zero_grad(&mut self) {
-        let mut g = self.grad.borrow_mut();
-        for v in g.iter_mut() {
+    pub fn zero_grad(&self) {
+        let mut inner = self.inner.borrow_mut();
+        for v in inner.grad.iter_mut() {
             *v = 0.0;
         }
     }
 
+    /// 反向傳播引擎 (Autograd 核心)
     pub fn backward(&self) {
         let mut topo = Vec::new();
         let mut visited = HashSet::new();
-        
-        fn build_topo(v: &Tensor, visited: &mut HashSet<usize>, topo: &mut Vec<usize>) {
-            if !visited.contains(&v.id) {
-                visited.insert(v.id);
-                for &prev_id in &v._prev {
-                    // We need to find the tensor by ID - this is a simplification
+
+        // 深度優先搜尋 (DFS) 建立拓撲排序
+        fn build_topo(t: &Tensor, visited: &mut HashSet<usize>, topo: &mut Vec<Tensor>) {
+            let id = t.id();
+            if !visited.contains(&id) {
+                visited.insert(id);
+                for prev in t.inner.borrow()._prev.iter() {
+                    build_topo(prev, visited, topo);
                 }
-                topo.push(v.id);
+                topo.push(t.clone());
             }
         }
-        
+
         build_topo(self, &mut visited, &mut topo);
-        
-        // Initialize gradient to ones
-        let mut g = self.grad.borrow_mut();
-        for v in g.iter_mut() {
-            *v = 1.0;
+
+        // 將起始節點 (通常是 Loss) 的梯度設為 1.0
+        {
+            let mut inner = self.inner.borrow_mut();
+            for v in inner.grad.iter_mut() {
+                *v = 1.0;
+            }
         }
-        
-        // Execute backward in reverse topological order
-        for id in topo.iter().rev() {
-            // In a full implementation, we'd look up tensors by ID and call their _backward
+
+        // 沿著拓撲排序反向傳遞梯度
+        for t in topo.into_iter().rev() {
+            // 使用 take() 拿出 _backward 閉包，避免借用衝突 (Borrow Checker Panic)
+            let backward_fn = t.inner.borrow_mut()._backward.take();
+            if let Some(bw) = backward_fn {
+                bw();
+            }
         }
     }
 
+    /* ----------------------------------------------------
+       數學運算與計算圖建構 (Forward & Backward)
+       ---------------------------------------------------- */
+
     pub fn add(&self, other: &Tensor) -> Tensor {
-        let data: Vec<f32> = self.data.borrow().iter().zip(other.data.borrow().iter())
-            .map(|(a, b)| a + b)
-            .collect();
-        
-        let mut shape = self.shape.clone();
-        if other.shape.len() > shape.len() {
-            shape = other.shape.clone();
-        }
-        
-        let requires_grad = self.requires_grad || other.requires_grad;
-        let mut out = Tensor::new(data, shape, requires_grad);
-        out._prev.insert(self.id);
-        out._prev.insert(other.id);
-        
+        let s = self.inner.borrow();
+        let o = other.inner.borrow();
+        assert_eq!(s.shape, o.shape, "Shapes must match for add");
+
+        let data: Vec<f32> = s.data.iter().zip(o.data.iter()).map(|(a, b)| a + b).collect();
+        let requires_grad = s.requires_grad || o.requires_grad;
+
+        let out = Tensor::new(data, s.shape.clone(), requires_grad);
+        out.inner.borrow_mut()._prev = vec![self.clone(), other.clone()];
+
         if requires_grad {
-            let self_data = self.data.clone();
-            let other_data = other.data.clone();
-            let self_grad = self.grad.clone();
-            let other_grad = other.grad.clone();
-            let out_grad = out.grad.clone();
-            
-            out._backward = Some(Box::new(move || {
-                let og = out_grad.borrow();
-                let mut sg = self_grad.borrow_mut();
-                let mut og = other_grad.borrow_mut();
-                for i in 0..sg.len() {
-                    sg[i] += og[i];
-                    og[i] += og[i];
+            let self_c = self.clone();
+            let other_c = other.clone();
+            let out_c = out.clone();
+
+            out.inner.borrow_mut()._backward = Some(Box::new(move || {
+                let out_grad = out_c.inner.borrow().grad.clone();
+                let mut sg = self_c.inner.borrow_mut();
+                let mut og = other_c.inner.borrow_mut();
+
+                for i in 0..out_grad.len() {
+                    if sg.requires_grad { sg.grad[i] += out_grad[i]; }
+                    if og.requires_grad { og.grad[i] += out_grad[i]; } // [修正] 之前寫成了 og 自己加自己
                 }
             }));
         }
-        
         out
     }
 
     pub fn mul(&self, other: &Tensor) -> Tensor {
-        let data: Vec<f32> = self.data.borrow().iter().zip(other.data.borrow().iter())
-            .map(|(a, b)| a * b)
-            .collect();
-        
-        let shape = if self.shape.len() > other.shape.len() { self.shape.clone() } else { other.shape.clone() };
-        let requires_grad = self.requires_grad || other.requires_grad;
-        
-        let mut out = Tensor::new(data, shape, requires_grad);
-        out._prev.insert(self.id);
-        out._prev.insert(other.id);
-        
+        let s = self.inner.borrow();
+        let o = other.inner.borrow();
+        assert_eq!(s.shape, o.shape, "Shapes must match for mul");
+
+        let data: Vec<f32> = s.data.iter().zip(o.data.iter()).map(|(a, b)| a * b).collect();
+        let requires_grad = s.requires_grad || o.requires_grad;
+
+        let out = Tensor::new(data, s.shape.clone(), requires_grad);
+        out.inner.borrow_mut()._prev = vec![self.clone(), other.clone()];
+
         if requires_grad {
-            let self_data = self.data.clone();
-            let other_data = other.data.clone();
-            let self_grad = self.grad.clone();
-            let other_grad = other.grad.clone();
-            let out_grad = out.grad.clone();
-            let shape1 = self.shape.clone();
-            let shape2 = other.shape.clone();
-            
-            out._backward = Some(Box::new(move || {
-                let od = out_grad.borrow();
-                let sd = self_data.borrow();
-                let od2 = other_data.borrow();
-                let mut sg = self_grad.borrow_mut();
-                let mut og = other_grad.borrow_mut();
+            let self_c = self.clone();
+            let other_c = other.clone();
+            let out_c = out.clone();
+
+            out.inner.borrow_mut()._backward = Some(Box::new(move || {
+                let out_g = out_c.inner.borrow().grad.clone();
+                let s_d = self_c.inner.borrow().data.clone();
+                let o_d = other_c.inner.borrow().data.clone();
                 
-                for i in 0..sg.len() {
-                    sg[i] += od[i] * od2[i % od2.len()];
-                    og[i] += od[i] * sd[i % sd.len()];
+                let mut sg = self_c.inner.borrow_mut();
+                let mut og = other_c.inner.borrow_mut();
+
+                for i in 0..out_g.len() {
+                    if sg.requires_grad { sg.grad[i] += out_g[i] * o_d[i]; }
+                    if og.requires_grad { og.grad[i] += out_g[i] * s_d[i]; }
                 }
             }));
         }
-        
         out
     }
 
+    /// 2D 矩陣乘法 (Matrix Multiplication)
     pub fn matmul(&self, other: &Tensor) -> Tensor {
-        let b1 = self.shape.len();
-        let m = *self.shape.last().unwrap();
-        let k = *other.shape.last().unwrap();
+        let s = self.inner.borrow();
+        let o = other.inner.borrow();
+        assert_eq!(s.shape.len(), 2, "Matmul only supports 2D for now");
+        assert_eq!(o.shape.len(), 2, "Matmul only supports 2D for now");
         
-        let a = self.data.borrow();
-        let b = other.data.borrow();
-        let mut result = vec![0.0; m * k];
-        
+        let m = s.shape[0];
+        let k1 = s.shape[1];
+        let k2 = o.shape[0];
+        let n = o.shape[1];
+        assert_eq!(k1, k2, "Inner dimensions must match");
+
+        let mut data = vec![0.0; m * n];
         for i in 0..m {
-            for j in 0..k {
-                for l in 0..b1 {
-                    result[i * k + j] += a[i * b1 + l] * b[l * k + j];
+            for j in 0..n {
+                for k in 0..k1 {
+                    data[i * n + j] += s.data[i * k1 + k] * o.data[k * n + j];
                 }
             }
         }
-        
-        let shape = vec![m, k];
-        let requires_grad = self.requires_grad || other.requires_grad;
-        let mut out = Tensor::new(result, shape, requires_grad);
-        out._prev.insert(self.id);
-        out._prev.insert(other.id);
-        
-        out
-    }
 
-    pub fn relu(&self) -> Tensor {
-        let data: Vec<f32> = self.data.borrow().iter().map(|&x| x.max(0.0)).collect();
-        
-        let mut out = Tensor::new(data, self.shape.clone(), self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-            
-            let self_data = self.data.clone();
-            let self_grad = self.grad.clone();
-            let out_grad = out.grad.clone();
-            
-            out._backward = Some(Box::new(move || {
-                let sd = self_data.borrow();
-                let og = out_grad.borrow();
-                let mut sg = self_grad.borrow_mut();
+        let requires_grad = s.requires_grad || o.requires_grad;
+        let out = Tensor::new(data, vec![m, n], requires_grad);
+        out.inner.borrow_mut()._prev = vec![self.clone(), other.clone()];
+
+        if requires_grad {
+            let self_c = self.clone();
+            let other_c = other.clone();
+            let out_c = out.clone();
+
+            out.inner.borrow_mut()._backward = Some(Box::new(move || {
+                let out_g = out_c.inner.borrow().grad.clone();
+                let s_d = self_c.inner.borrow().data.clone();
+                let o_d = other_c.inner.borrow().data.clone();
                 
-                for i in 0..sg.len() {
-                    if sd[i] > 0.0 {
-                        sg[i] += og[i];
+                let mut sg = self_c.inner.borrow_mut();
+                let mut og = other_c.inner.borrow_mut();
+
+                // dA = dC * B^T
+                if sg.requires_grad {
+                    for i in 0..m {
+                        for j in 0..k1 {
+                            for l in 0..n {
+                                sg.grad[i * k1 + j] += out_g[i * n + l] * o_d[j * n + l];
+                            }
+                        }
+                    }
+                }
+                // dB = A^T * dC
+                if og.requires_grad {
+                    for i in 0..k1 {
+                        for j in 0..n {
+                            for l in 0..m {
+                                og.grad[i * n + j] += s_d[l * k1 + i] * out_g[l * n + j];
+                            }
+                        }
                     }
                 }
             }));
         }
-        
         out
     }
 
-    pub fn sum(&self) -> Tensor {
-        let sum: f32 = self.data.borrow().iter().sum();
-        
-        let mut out = Tensor::new(vec![sum], vec![1], self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-            
-            let self_grad = self.grad.clone();
-            let out_grad = out.grad.clone();
-            let size = self.data.borrow().len();
-            
-            out._backward = Some(Box::new(move || {
-                let og = out_grad.borrow();
-                let mut sg = self_grad.borrow_mut();
-                let val = og[0];
-                for s in sg.iter_mut() {
-                    *s += val;
+    pub fn relu(&self) -> Tensor {
+        let s = self.inner.borrow();
+        let data: Vec<f32> = s.data.iter().map(|&x| x.max(0.0)).collect();
+
+        let out = Tensor::new(data, s.shape.clone(), s.requires_grad);
+        out.inner.borrow_mut()._prev = vec![self.clone()];
+
+        if s.requires_grad {
+            let self_c = self.clone();
+            let out_c = out.clone();
+
+            out.inner.borrow_mut()._backward = Some(Box::new(move || {
+                let out_g = out_c.inner.borrow().grad.clone();
+                let s_d = self_c.inner.borrow().data.clone();
+                let mut sg = self_c.inner.borrow_mut();
+
+                for i in 0..sg.grad.len() {
+                    if s_d[i] > 0.0 {
+                        sg.grad[i] += out_g[i];
+                    }
                 }
             }));
         }
-        
         out
     }
 
-    pub fn transpose(&self) -> Tensor {
-        let shape = vec![self.shape[1], self.shape[0]];
-        let data: Vec<f32> = self.data.borrow().chunks(self.shape[0])
-            .flat_map(|c| c.iter().copied())
-            .collect();
-        
-        let mut out = Tensor::new(data, shape, self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-        }
-        
-        out
-    }
-
-    pub fn reshape(&self, shape: Vec<usize>) -> Tensor {
-        let data = self.data.borrow().clone();
-        
-        let mut out = Tensor::new(data, shape, self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-        }
-        
-        out
-    }
-
-    pub fn softmax(&self, axis: usize) -> Tensor {
-        let data = self.data.borrow();
-        let max_val = data.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
-        
-        let exps: Vec<f32> = data.iter().map(|&x| (x - max_val).exp()).collect();
-        let sum: f32 = exps.iter().sum();
-        let probs: Vec<f32> = exps.iter().map(|&x| x / sum).collect();
-        
-        let mut out = Tensor::new(probs, self.shape.clone(), self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-            
-            // Simplified softmax backward
-            let self_grad = self.grad.clone();
-            let out_grad = out.grad.clone();
-            
-            out._backward = Some(Box::new(move || {
-                let og = out_grad.borrow();
-                let mut sg = self_grad.borrow_mut();
-                for i in 0..sg.len() {
-                    sg[i] += og[i];
-                }
-            }));
-        }
-        
-        out
-    }
-
+    /// (Batched) 交叉熵損失與內建 Softmax
+    /// 要求 self 的 shape 必須為 2D: [batch_size, num_classes]
     pub fn cross_entropy(&self, targets: &[usize]) -> Tensor {
-        let data = self.data.borrow();
-        
-        if targets.is_empty() || data.is_empty() {
-            return Tensor::new(vec![0.0], vec![1], self.requires_grad);
-        }
-        
-        let vocab_size = if self.shape.len() == 2 {
-            self.shape[1]
-        } else if self.shape.len() == 3 {
-            self.shape[2]
-        } else {
-            data.len() / targets.len().max(1)
-        };
-        
-        if vocab_size == 0 {
-            return Tensor::new(vec![0.0], vec![1], self.requires_grad);
-        }
-        
-        let n = (data.len() / vocab_size).max(1);
-        
-        let max_logits: Vec<f32> = (0..n)
-            .map(|i| {
-                let start = i * vocab_size;
-                let end = start + vocab_size;
-                data[start..end.min(data.len())].iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b))
-            })
-            .collect();
-        
+        let s = self.inner.borrow();
+        assert_eq!(s.shape.len(), 2, "Cross entropy requires 2D output [batch, classes]");
+        let batch_size = s.shape[0];
+        let num_classes = s.shape[1];
+        assert_eq!(targets.len(), batch_size, "Targets length must match batch size");
+
         let mut loss = 0.0;
-        for i in 0..n.min(targets.len()) {
-            let offset = i * vocab_size;
-            let end = (offset + vocab_size).min(data.len());
-            let exp_sum: f32 = data[offset..end].iter()
-                .map(|&x| (x - max_logits[i]).exp())
-                .sum();
+        let mut probs = vec![0.0; s.data.len()];
+
+        for i in 0..batch_size {
+            let offset = i * num_classes;
+            let logits = &s.data[offset..offset + num_classes];
             
-            let target = targets[i];
-            if offset + target < data.len() {
-                let prob = (data[offset + target] - max_logits[i]).exp() / exp_sum.max(1e-10);
-                loss -= prob.max(1e-10).ln();
+            let max_logit = logits.iter().fold(f32::NEG_INFINITY, |a, &b| a.max(b));
+            let exps: Vec<f32> = logits.iter().map(|&x| (x - max_logit).exp()).collect();
+            let sum_exp: f32 = exps.iter().sum();
+
+            for j in 0..num_classes {
+                probs[offset + j] = exps[j] / sum_exp;
             }
-        }
-        let m = n.min(targets.len()).max(1);
-        if m > 0 {
-            loss /= m as f32;
-        }
-        
-        let mut out = Tensor::new(vec![loss], vec![1], self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-        }
-        
-        out
-    }
 
-    pub fn pow(&self, power: f32) -> Tensor {
-        let data: Vec<f32> = self.data.borrow().iter().map(|&x| x.powf(power)).collect();
+            let target = targets[i];
+            loss += -probs[offset + target].max(1e-7).ln();
+        }
         
-        let mut out = Tensor::new(data, self.shape.clone(), self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-            
-            let self_data = self.data.clone();
-            let self_grad = self.grad.clone();
-            let out_grad = out.grad.clone();
-            let p = power;
-            
-            out._backward = Some(Box::new(move || {
-                let sd = self_data.borrow();
-                let og = out_grad.borrow();
-                let mut sg = self_grad.borrow_mut();
+        loss /= batch_size as f32;
+
+        let out = Tensor::new(vec![loss], vec![1], s.requires_grad);
+        out.inner.borrow_mut()._prev = vec![self.clone()];
+
+        if s.requires_grad {
+            let self_c = self.clone();
+            let out_c = out.clone();
+            let targets_c = targets.to_vec();
+
+            out.inner.borrow_mut()._backward = Some(Box::new(move || {
+                let out_g = out_c.inner.borrow().grad[0];
+                let mut sg = self_c.inner.borrow_mut();
+
+                let d_loss = out_g / batch_size as f32;
                 
-                for i in 0..sg.len() {
-                    sg[i] += og[i] * p * sd[i].powf(p - 1.0);
+                for i in 0..batch_size {
+                    let offset = i * num_classes;
+                    let target = targets_c[i];
+                    for j in 0..num_classes {
+                        let mut p = probs[offset + j];
+                        if j == target {
+                            p -= 1.0;
+                        }
+                        sg.grad[offset + j] += p * d_loss;
+                    }
                 }
             }));
         }
-        
-        out
-    }
-
-    pub fn neg(&self) -> Tensor {
-        let data: Vec<f32> = self.data.borrow().iter().map(|&x| -x).collect();
-        
-        let mut out = Tensor::new(data, self.shape.clone(), self.requires_grad);
-        if self.requires_grad {
-            out._prev.insert(self.id);
-            
-            let self_grad = self.grad.clone();
-            let out_grad = out.grad.clone();
-            
-            out._backward = Some(Box::new(move || {
-                let og = out_grad.borrow();
-                let mut sg = self_grad.borrow_mut();
-                for i in 0..sg.len() {
-                    sg[i] -= og[i];
-                }
-            }));
-        }
-        
         out
     }
 }
 
 impl fmt::Debug for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Tensor(shape={:?}, requires_grad={})", self.shape, self.requires_grad)
+        let inner = self.inner.borrow();
+        write!(f, "Tensor(shape={:?}, data={:?}, requires_grad={})", inner.shape, inner.data, inner.requires_grad)
     }
 }
+/*
+// ============================================
+// 以下是一個簡單的 main 函數用來測試功能是否正常
+// ============================================
+fn main() {
+    // 建立權重與輸入 (需要計算梯度的權重設為 true)
+    let weights = Tensor::new(vec![0.5, -0.2, 0.1, 0.8, 0.4, -0.5], vec![2, 3], true);
+    let inputs = Tensor::new(vec![1.0, 2.0], vec![1, 2], false); // shape: [1, 2]
 
-pub fn cat(tensors: &[Tensor], axis: usize) -> Tensor {
-    let mut all_data = Vec::new();
-    let mut shapes = Vec::new();
-    let mut requires_grad = false;
+    // 進行前向傳播 (Forward Pass)
+    // outputs: [1, 2] x [2, 3] -> [1, 3]
+    let hidden = inputs.matmul(&weights);
+    let activated = hidden.relu();
     
-    for t in tensors {
-        all_data.extend(t.data.borrow().clone());
-        shapes.push(t.shape.clone());
-        requires_grad = requires_grad || t.requires_grad;
-    }
-    
-    let new_size = tensors.iter().map(|t| t.shape[axis]).sum();
-    let mut new_shape = shapes[0].clone();
-    new_shape[axis] = new_size;
-    
-    let mut out = Tensor::new(all_data, new_shape, requires_grad);
-    
-    for t in tensors {
-        out._prev.insert(t.id);
-    }
-    
-    out
+    // 計算 Loss
+    let targets = vec![2]; // 目標類別為 index 2
+    let loss = activated.cross_entropy(&targets);
+
+    println!("Forward Pass 結束");
+    println!("Loss: {:?}", loss.inner.borrow().data[0]);
+
+    // 進行反向傳播 (Backward Pass)
+    loss.backward();
+
+    println!("Backward Pass 結束");
+    println!("Weights Gradients:");
+    println!("{:?}", weights.inner.borrow().grad);
 }
+*/

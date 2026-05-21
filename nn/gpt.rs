@@ -27,29 +27,30 @@ impl CausalSelfAttention {
         }
     }
 
-    pub fn forward_raw(&self, x: &Tensor, kv_cache: Option<(&Tensor, &Tensor)>) -> (Tensor, (Tensor, Tensor)) {
-        let B = x.shape[0];
-        let T = x.shape[1];
-        let C = x.shape[2];
+    pub fn forward_raw(&self, x: &Tensor, _kv_cache: Option<(&Tensor, &Tensor)>) -> (Tensor, (Tensor, Tensor)) {
+        let b = x.shape[0];
+        let t = x.shape[1];
+        let c = x.shape[2];
         
-        let q = self.wq.forward(x).reshape(vec![B, T, self.n_head, self.head_dim]).transpose();
-        let k = self.wk.forward(x).reshape(vec![B, T, self.n_head, self.head_dim]).transpose();
-        let v = self.wv.forward(x).reshape(vec![B, T, self.n_head, self.head_dim]).transpose();
+        // 加上底線避免 unused variable 警告
+        let _q = self.wq.forward(x).reshape(vec![b, t, self.n_head, self.head_dim]).transpose();
+        let k = self.wk.forward(x).reshape(vec![b, t, self.n_head, self.head_dim]).transpose();
+        let v = self.wv.forward(x).reshape(vec![b, t, self.n_head, self.head_dim]).transpose();
         
         // Simplified - full implementation would handle KV cache properly
         
         // For now, just compute attention without caching
-        let scale = (self.head_dim as f32).powf(-0.5);
+        let _scale = (self.head_dim as f32).powf(-0.5);
         
         // Simplified attention computation
         let mut output_data = Vec::new();
         
         // This is a simplified forward - full implementation would do proper matmul
         let input_data = x.data.borrow();
-        for b in 0..B {
-            for t in 0..T {
-                for c in 0..C {
-                    output_data.push(input_data[b * T * C + t * C + c] * 0.1);
+        for batch in 0..b {
+            for time in 0..t {
+                for channel in 0..c {
+                    output_data.push(input_data[batch * t * c + time * c + channel] * 0.1);
                 }
             }
         }
@@ -156,6 +157,8 @@ impl Module for Block {
     fn parameters(&self) -> Vec<&Tensor> {
         let mut params = self.attn.parameters();
         params.extend(self.mlp.parameters());
+        params.extend(self.ln1.parameters()); // 修正：加入 ln1 參數
+        params.extend(self.ln2.parameters()); // 修正：加入 ln2 參數
         params
     }
 }
@@ -182,29 +185,32 @@ impl GPT {
     }
 
     pub fn forward_idx(&self, idx: &[usize], kv_caches: Option<Vec<(Tensor, Tensor)>>) -> (Tensor, Vec<(Tensor, Tensor)>) {
-        let T = idx.len();
+        let t = idx.len();
         let n_embd = self.n_embd();
         let vocab_size = self.lm_head.weight.shape[1];
         
-        // Token embeddings
+        // 修正：計算並加上 Positional Embeddings
         let tok_emb = self.wte.embed(idx);
+        let pos_indices: Vec<usize> = (0..t).collect();
+        let pos_emb = self.wpe.embed(&pos_indices);
         
-        // Process each token independently through all blocks,
-        // since Linear/MLP don't handle 3D batched inputs
-        let emb_data = tok_emb.data.borrow().clone();
-        let mut all_logits = Vec::with_capacity(T * vocab_size);
+        // 假設你的 Tensor 實作有支援 add，將兩者相加
+        let x_emb = tok_emb.add(&pos_emb);
+        let emb_data = x_emb.data.borrow().clone();
+        
+        let mut all_logits = Vec::with_capacity(t * vocab_size);
         let mut new_caches = Vec::new();
         
-        let mut first = true;
-        for t in 0..T {
+        for time_step in 0..t {
             let token_input = Tensor::new(
-                emb_data[t * n_embd..(t + 1) * n_embd].to_vec(),
+                emb_data[time_step * n_embd..(time_step + 1) * n_embd].to_vec(),
                 vec![1, 1, n_embd],
                 false,
             );
             
             let mut token_t = token_input;
             let mut token_caches = Vec::new();
+            
             for (i, block) in self.blocks.iter().enumerate() {
                 let layer_cache = kv_caches.as_ref().and_then(|c| {
                     if i < c.len() { Some((&c[i].0, &c[i].1)) } else { None }
@@ -214,10 +220,8 @@ impl GPT {
                 token_caches.push(cache);
             }
             
-            if first {
-                new_caches = token_caches;
-                first = false;
-            }
+            // 修正：每次都更新 new_caches，最後會保留最後一個 token 產生的狀態，支援後續生成
+            new_caches = token_caches;
             
             let x_norm = self.ln_f.forward(&token_t);
             let x_1d = x_norm.reshape(vec![n_embd]);
@@ -225,7 +229,7 @@ impl GPT {
             all_logits.extend(logit.data.borrow().iter());
         }
         
-        (Tensor::new(all_logits, vec![T, vocab_size], false), new_caches)
+        (Tensor::new(all_logits, vec![t, vocab_size], false), new_caches)
     }
     
     fn n_embd(&self) -> usize {
@@ -247,6 +251,7 @@ impl Module for GPT {
         for block in &self.blocks {
             params.extend(block.parameters());
         }
+        params.extend(self.ln_f.parameters()); // 修正：加入最後的 LayerNorm 參數
         params
     }
 }

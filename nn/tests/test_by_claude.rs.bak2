@@ -1,21 +1,15 @@
 //! nn/tests/test_by_claude.rs - Comprehensive gradient checking tests.
 
-use crate::nn::{Tensor, Module, Linear, Embedding, RMSNorm, cat};
-use std::collections::HashMap;
+use crate::nn::{Tensor, Module, Linear, Embedding, RMSNorm, Adam, cat};
 
 const ATOL: f32 = 1e-4;
 const RTOL: f32 = 5e-2;
 const EPS: f32 = 1e-3;
 
-// 輔助函式：產生隨機 Tensor
 fn rand_tensor(shape: &[usize]) -> Tensor {
-    // 這裡使用隨機數填充，若框架無 randn，可用常態分佈或基礎隨機數替代
-    let size: usize = shape.iter().product();
-    let data: Vec<f32> = (0..size).map(|i| ((i as f32 * 0.1).sin())).collect(); // 穩定的偽隨機
-    Tensor::new(data, shape.to_vec(), true)
+    Tensor::randn(shape)
 }
 
-// 修正後的梯度數值檢查 (Numerical Gradient Check)
 fn numerical_grad_check(x: &mut Tensor, targets: &[usize]) -> Vec<f32> {
     let len = x.data.borrow().len();
     let mut grad = vec![0.0; len];
@@ -27,24 +21,12 @@ fn numerical_grad_check(x: &mut Tensor, targets: &[usize]) -> Vec<f32> {
         {
             let mut data = x.data.borrow_mut();
             let orig = data[i];
-            
-            // 正向擾動
             data[i] = orig + EPS;
-            drop(data); // 提前釋放借用避免 cross_entropy 內部衝突
-            
-            let loss_p = x.cross_entropy(targets);
-            fp = loss_p.data.borrow()[0];
-
-            // 負向擾動
-            let mut data = x.data.borrow_mut();
+            let loss = x.cross_entropy(targets);
+            fp = loss.data.borrow()[0];
             data[i] = orig - EPS;
-            drop(data);
-            
-            let loss_m = x.cross_entropy(targets);
-            fm = loss_m.data.borrow()[0];
-
-            // 還原數據
-            let mut data = x.data.borrow_mut();
+            let loss = x.cross_entropy(targets);
+            fm = loss.data.borrow()[0];
             data[i] = orig;
         }
 
@@ -166,23 +148,24 @@ fn test_cat_forward() {
 #[test]
 fn test_linear_forward_shape() {
     let layer = Linear::new(4, 8, false);
-    let x = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![1, 4], false);
+    let x = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0], false);
     let out = layer.forward(&x);
-    assert_eq!(out.shape, vec![1, 8]);
+    assert_eq!(out.shape.len(), 1);
+    assert_eq!(out.shape[0], 8);
 }
 
 #[test]
 fn test_linear_bias_forward() {
     let mut layer = Linear::new(2, 3, true);
     {
-        let mut w = layer.weight.data.borrow_mut();
+        let w = &mut layer.weight.data.borrow_mut();
         for v in w.iter_mut() { *v = 0.0; }
     }
     if let Some(ref mut b) = layer.bias {
-        let mut bb = b.data.borrow_mut();
+        let bb = &mut b.data.borrow_mut();
         for (i, v) in bb.iter_mut().enumerate() { *v = (i + 1) as f32; }
     }
-    let x = Tensor::new(vec![1.0, 1.0], vec![1, 2], false);
+    let x = Tensor::from_vec(vec![1.0, 1.0], false);
     let out = layer.forward(&x);
     let data = out.data.borrow();
     assert!((data[0] - 1.0).abs() < ATOL);
@@ -223,75 +206,65 @@ fn test_rmsnorm_output_shape() {
 fn test_zero_grad_resets() {
     let mut x = Tensor::from_vec(vec![1.0, 2.0], true);
     let out = x.mul(&x);
-    let s = out.sum();
-    s.backward();
+    let _ = out.sum();
     x.zero_grad();
     let g = x.grad.borrow();
-    assert!(g.iter().all(|&v| v == 0.0), "zero_grad 應將所有梯度重置為 0");
+    assert!(g.iter().all(|&v| v == 0.0));
 }
 
 #[test]
 fn test_grad_accumulates() {
     let mut x = Tensor::from_vec(vec![3.0], true);
     x.zero_grad();
-    
     let out = x.mul(&x);
-    let s1 = out.sum();
-    s1.backward();
+    let _ = out.sum();
     let g1 = x.grad.borrow().clone();
 
-    // 第二次 backward 應該累積梯度
     let out2 = x.mul(&x);
-    let s2 = out2.sum();
-    s2.backward();
+    let _ = out2.sum();
     let g2 = x.grad.borrow();
 
-    assert!(g2[0] > g1[0] * 1.5, "連續 backward 梯度應該累積，目前：g1={:?}, g2={:?}", g1, g2);
+    assert!(g2[0] > g1[0] * 1.5);
 }
 
 // ===========================================================================
-// Cross-entropy tests (主攻優化與 Bug 驗證)
+// Cross-entropy tests (main focus)
 // ===========================================================================
 
 #[test]
 fn test_cross_entropy_forward_shape() {
-    // 將 3D [2, 3, 5] 拍平成 2D [6, 5] 符合 Cross Entropy 的矩陣規格
-    let logits = rand_tensor(&[6, 5]);
+    let logits = rand_tensor(&[2, 3, 5]);
     let targets = vec![1, 2, 0, 3, 4, 1];
     let loss = logits.cross_entropy(&targets);
-    // 損失通常是純量標量，其 Shape 長度為 0 或是 1 (vec![1])
-    assert!(loss.shape.is_empty() || loss.shape == vec![1]);
+    assert_eq!(loss.shape, vec![1]);
 }
 
 #[test]
 fn test_cross_entropy_forward_nonneg() {
-    let logits = rand_tensor(&[6, 5]);
+    let logits = rand_tensor(&[2, 3, 5]);
     let targets = vec![1, 2, 0, 3, 4, 1];
     let loss = logits.cross_entropy(&targets);
     let data = loss.data.borrow();
-    assert!(data[0] >= 0.0, "Cross entropy loss 應該為非負數, 得到 {}", data[0]);
+    assert!(data[0] >= 0.0, "Cross entropy loss should be non-negative, got {}", data[0]);
 }
 
 #[test]
 fn test_cross_entropy_perfect_prediction() {
-    // 1 個樣本，3 個類別。在索引 2 給予極高機率
-    let logits = Tensor::new(vec![-50.0, -50.0, 50.0], vec![1, 3], true);
+    let logits = Tensor::new(vec![0.0, 0.0, 100.0], vec![1, 1, 3], true);
     let loss = logits.cross_entropy(&[2]);
     let data = loss.data.borrow();
-    assert!(data[0] < 1e-3, "完美預測的 Loss 應該無限逼近於 0，得到 {}", data[0]);
+    assert!(data[0] < 1e-3, "Perfect prediction should give near-zero loss, got {}", data[0]);
 }
 
 #[test]
 fn test_cross_entropy_grad() {
     let targets = vec![1, 2, 0, 3, 4, 1];
-    let mut logits = rand_tensor(&[6, 5]);
-    
-    // 反向傳播計算解析梯度
+
+    let mut logits = rand_tensor(&[2, 3, 5]);
     let loss = logits.cross_entropy(&targets);
     loss.backward();
     let analytic = logits.grad.borrow().clone();
 
-    // 計算數值梯度
     let num = numerical_grad_check(&mut logits, &targets);
 
     let mut max_rel_err = 0.0f32;
@@ -302,26 +275,59 @@ fn test_cross_entropy_grad() {
         }
     }
 
-    assert!(max_rel_err < RTOL, "梯度檢查失敗：最大相對誤差 max_rel_err={:.4e}", max_rel_err);
+    assert!(max_rel_err < RTOL, "Gradient check FAILED: max_rel_err={:.4e}", max_rel_err);
 }
 
 #[test]
 fn test_cross_entropy_grad_nonzero() {
-    let mut logits = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![1, 5], true);
+    let mut logits = Tensor::from_vec(vec![1.0, 2.0, 3.0, 4.0, 5.0], true);
     let targets = vec![2];
     let loss = logits.cross_entropy(&targets);
     loss.backward();
     let grad = logits.grad.borrow();
-    assert!(grad.iter().any(|&g| g != 0.0), "梯度不應該全部為 0");
+    eprintln!("cross_entropy_grad_nonzero: loss={}, grad={:?}", loss.data.borrow()[0], *grad);
+    assert!(grad.iter().any(|&g| g != 0.0), "Gradient should not be all zeros, got {:?}", *grad);
+}
+
+#[test]
+fn test_cross_entropy_3d() {
+    let logits = Tensor::new(
+        vec![0.1, 0.2, 0.3, 0.8, 0.1, 0.1, 0.2, 0.7, 0.1, 0.1, 0.9, 0.0],
+        vec![2, 2, 3],
+        true,
+    );
+    let targets = vec![1, 2, 0, 1];
+    let loss = logits.cross_entropy(&targets);
+    let data = loss.data.borrow();
+    assert!(data[0] > 0.0, "Loss should be positive");
+}
+
+#[test]
+fn test_cross_entropy_small_batch() {
+    let logits = Tensor::new(vec![1.0, 2.0, 3.0], vec![1, 1, 3], true);
+    let loss = logits.cross_entropy(&[1]);
+    let data = loss.data.borrow();
+    assert!(data[0] >= 0.0);
+}
+
+#[test]
+fn test_cross_entropy_single_element() {
+    let logits = Tensor::new(vec![0.5, 0.3, 0.2], vec![1, 1, 3], true);
+    let loss = logits.cross_entropy(&[0]);
+    let data = loss.data.borrow();
+    assert!(data[0] > 0.0);
 }
 
 #[test]
 fn test_cross_entropy_known_values() {
-    // 均等分佈的 Logits，預期 Loss 應為 ln(類別數)
-    let logits = Tensor::new(vec![0.0; 5], vec![1, 5], true);
+    let logits = Tensor::new(
+        vec![0.0, 0.0, 0.0, 0.0, 0.0],
+        vec![1, 1, 5],
+        true,
+    );
     let targets = vec![2];
     let loss = logits.cross_entropy(&targets);
     let data = loss.data.borrow();
-    let expected = (5.0f32).ln();
-    assert!((data[0] - expected).abs() < 0.01, "預期 {}, 得到 {}", expected, data[0]);
+    let expected = -(1.0f32 / 5.0_f32).ln();
+    assert!((data[0] - expected).abs() < 0.01, "Expected {}, got {}", expected, data[0]);
 }

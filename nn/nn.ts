@@ -29,8 +29,13 @@ export class Linear extends Module {
     const std = 0.08;
     const w: number[] = [];
     for (let i = 0; i < out_features; i++)
-      for (let j = 0; j < in_features; j++)
-        w.push((Math.random() * 2 - 1) * std);
+      for (let j = 0; j < in_features; j++) {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        const normal = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        w.push(normal * std);
+      }
     this.weight = new Tensor(w, [out_features, in_features], true);
     this.bias = bias ? new Tensor(new Array(out_features).fill(0), [out_features], true) : null;
   }
@@ -60,8 +65,13 @@ export class Embedding extends Module {
     super();
     const w: number[] = [];
     for (let i = 0; i < num_embeddings; i++)
-      for (let j = 0; j < embedding_dim; j++)
-        w.push((Math.random() * 2 - 1) * 0.08);
+      for (let j = 0; j < embedding_dim; j++) {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        const normal = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        w.push(normal * 0.08);
+      }
     this.weight = new Tensor(w, [num_embeddings, embedding_dim], true);
   }
 
@@ -161,7 +171,7 @@ export class Adam {
   v: number[][] = [];
   t = 0;
 
-  constructor(params: Tensor[], lr = 0.01, betas: [number, number] = [0.9, 0.999], eps = 1e-8) {
+  constructor(params: Tensor[], lr = 0.01, betas: [number, number] = [0.85, 0.99], eps = 1e-8) {
     this.params = params;
     this.lr = lr;
     this.beta1 = betas[0];

@@ -4,6 +4,7 @@
 use ai4::nn::{GPT, Adam, Tensor, Module};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{self, Write}; // 修正：引入 io::Write 以支援 flush
 
 fn encode(text: &str, char_to_idx: &HashMap<char, usize>) -> Vec<usize> {
     text.chars().filter_map(|c| char_to_idx.get(&c).copied()).collect()
@@ -32,7 +33,9 @@ fn train_model(
         
         optimizer.step();
         
+        // 修正：印出進度並強制刷新緩衝區，這樣 \r 才會實時更新
         print!("step {:4} / {:4} | loss {:.4}\r", step + 1, num_steps, loss.data.borrow()[0]);
+        let _ = io::stdout().flush();
     }
     println!();
 }
@@ -63,15 +66,18 @@ fn generate_samples(
             let logits_slice: Vec<f32> = data[..vocab_size].to_vec();
             
             let max_logit = logits_slice.iter().fold(f32::NEG_INFINITY, |m, &v| m.max(v));
+            
+            // 修正：括號位置修正，整個 (v - max_logit) 除以 temperature
             let exps: Vec<f32> = logits_slice.iter()
-                .map(|v| (v - max_logit / temperature).exp())
+                .map(|&v| ((v - max_logit) / temperature).exp())
                 .collect();
+                
             let sum: f32 = exps.iter().sum();
             let probs: Vec<f32> = exps.iter().map(|v| v / sum).map(|v| if v.is_finite() { v } else { 0.0 }).collect();
             
             let r: f32 = rand::random();
             let mut cumsum = 0.0f32;
-            current_token = bos;
+            current_token = bos; // Default fallback
             for (i, &p) in probs.iter().enumerate() {
                 cumsum += p;
                 if r <= cumsum {
@@ -98,12 +104,18 @@ fn main() {
     let data_path = "data/input.txt";
     if !std::path::Path::new(data_path).exists() {
         println!("Downloading names.txt...");
+        
+        // 修正：下載前確保父資料夾存在，否則 curl 會失敗導致找不到檔案
+        if let Some(parent) = std::path::Path::new(data_path).parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        
         let _ = std::process::Command::new("curl")
             .args(["-s", "https://raw.githubusercontent.com/karpathy/makemore/988aa59/names.txt", "-o", data_path])
             .output();
     }
     
-    let content = fs::read_to_string(data_path).expect("Failed to read data/input.txt");
+    let content = fs::read_to_string(data_path).expect("Failed to read data/input.txt. Please check if download succeeded.");
     let docs: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
     println!("num docs: {}", docs.len());
     
