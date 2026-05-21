@@ -129,57 +129,39 @@ export class Tensor {
   }
 
   transpose(ax1: number, ax2: number): Tensor {
+    const strides = this.strides();
     const n = this.shape.length;
-    const order = [...Array(n).keys()].map((_, i) => {
-      if (i === ax1) return ax2;
-      if (i === ax2) return ax1;
-      return i;
-    });
-    const newShape = order.map(i => this.shape[i]);
-    const stridesIn = this.strides();
-    const stridesOut = order.map(i => stridesIn[i]);
-    const data: number[] = new Array(this.data.length);
-    for (let i = 0; i < this.data.length; i++) {
-      let src = 0;
-      let remaining = i;
-      for (let d = n - 1; d >= 0; d--) {
-        const s = i;
-        let idx = 0;
-        let rem = s;
-        const outIdx = new Array(n).fill(0);
-        for (let j = n - 1; j >= 0; j--) {
-          outIdx[j] = rem % newShape[j];
-          rem = Math.floor(rem / newShape[j]);
-        }
-        for (let j = 0; j < n; j++) idx += outIdx[order[j]] * stridesIn[j];
-      }
+    const size = this.data.length;
+
+    const newShape = [...this.shape];
+    [newShape[ax1], newShape[ax2]] = [newShape[ax2], newShape[ax1]];
+
+    const newStrides: number[] = [];
+    newStrides[n - 1] = 1;
+    for (let i = n - 2; i >= 0; i--) {
+      newStrides[i] = newStrides[i + 1] * newShape[i + 1];
     }
 
-    const getFlatIndex = (indices: number[]) => {
-      let idx = 0;
-      for (let d = 0; d < n; d++) idx += indices[d] * stridesIn[d];
-      return idx;
-    };
-
-    const outData: number[] = new Array(this.data.length);
-    for (let i = 0; i < this.data.length; i++) {
-      const indices: number[] = [];
+    const outData: number[] = new Array(size);
+    for (let i = 0; i < size; i++) {
       let rem = i;
+      const srcIdx: number[] = [];
       for (let d = n - 1; d >= 0; d--) {
-        indices.unshift(rem % newShape[d]);
-        rem = Math.floor(rem / newShape[d]);
+        srcIdx.unshift(Math.floor(rem / strides[d]));
+        rem %= strides[d];
       }
-      const origIndices = indices.map((_, d) => indices[order[d]]);
-      outData[getFlatIndex(origIndices)] = this.data[i];
+      const dstIdx = [...srcIdx];
+      [dstIdx[ax1], dstIdx[ax2]] = [dstIdx[ax2], dstIdx[ax1]];
+      let outIdx = 0;
+      for (let d = 0; d < n; d++) outIdx += dstIdx[d] * newStrides[d];
+      outData[outIdx] = this.data[i];
     }
 
     const result = new Tensor(outData, newShape, this.requires_grad);
     result._prev = [this];
     result._backward = () => {
       if (this.requires_grad) {
-        for (let i = 0; i < this.data.length; i++) {
-          this.grad[i] += result.grad[i];
-        }
+        for (let i = 0; i < size; i++) this.grad[i] += result.grad[i];
       }
     };
     return result;

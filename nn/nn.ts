@@ -36,7 +36,9 @@ export class Linear extends Module {
   }
 
   forward(x: Tensor): Tensor {
-    const out = x.matmul(this.weight);
+    const wndim = this.weight.shape.length;
+    const wT = this.weight.transpose(wndim - 2, wndim - 1);
+    const out = x.matmul(wT);
     return this.bias ? out.add(this.bias) : out;
   }
 }

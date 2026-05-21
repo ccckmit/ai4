@@ -488,9 +488,9 @@ export class BatchNorm2d {
           for (let h = 0; h < H; h++) {
             for (let w = 0; w < W; w++) {
               const idx = n * C * H * W + c * H * W + h * W + w;
-              const var = this.training ? this.running_var[c] : this.running_var[c];
-              const mean = this.training ? this.running_mean[c] : this.running_mean[c];
-              const std_inv = 1 / Math.sqrt(var + this.eps);
+              const bn_var = this.training ? this.running_var[c] : this.running_var[c];
+              const bn_mean = this.training ? this.running_mean[c] : this.running_mean[c];
+              const std_inv = 1 / Math.sqrt(bn_var + this.eps);
               x.grad[idx] += result.grad[idx] * this.weight.data[c] * std_inv;
             }
           }

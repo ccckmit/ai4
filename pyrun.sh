@@ -15,8 +15,8 @@ python -m nn.chargpt_demo
 
 python nn/mnist/train.py
 
-python world/examples/cartpole_closed_form.py
+# python world/examples/cartpole_closed_form.py
 
-python world/examples/cartpole_vpg.py
+# python world/examples/cartpole_vpg.py
 
-python world/examples/bipedalwalker.py
+# python world/examples/bipedalwalker.py
