@@ -13,7 +13,7 @@ mod tests;
 
 pub use core::{Env, StepResult};
 pub use spaces::{Discrete, Box as SpaceBox};
-pub use envs::{FrozenLakeEnv, CartPoleEnv};
+pub use envs::{FrozenLakeEnv, CartPoleEnv, PongEnv};
 pub use wrappers::{TimeLimitWrapper, RecordEpisodeWrapper};
 pub use utils::{registry, run_random_agent};
 

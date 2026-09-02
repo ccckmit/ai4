@@ -9,7 +9,7 @@ pub mod ml;
 pub mod nn;
 pub mod llm;
 
-pub use world::{Env, Discrete, FrozenLakeEnv, CartPoleEnv, StepResult, registry};
+pub use world::{Env, Discrete, FrozenLakeEnv, CartPoleEnv, PongEnv, StepResult, registry};
 pub use ml::{LinearRegression, LogisticRegression, DecisionTree, RandomForest, KMeans, PCA, StandardScaler, train_test_split, accuracy_score, mean_squared_error, r2_score};
 pub use nn::{Tensor, Linear, Embedding, RMSNorm, Adam, GPT, cat};
 pub use llm::agent::Agent;

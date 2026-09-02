@@ -123,6 +123,48 @@ def test_cartpole_invalid_action():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Pong tests
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_pong_reset():
+    env = world.make("Pong-v1")
+    obs, info = env.reset(seed=0)
+    assert obs.shape == (5,), f"Expected shape (5,), got {obs.shape}"
+    assert abs(obs[0] - 0.5) < 0.001, "ball_x should start at 0.5"
+    assert abs(obs[1] - 0.5) < 0.001, "ball_y should start at 0.5"
+    assert abs(obs[4] - 0.5) < 0.001, "paddle_y should start at 0.5"
+    print("  [PASS] Pong reset")
+
+
+def test_pong_step():
+    env = world.make("Pong-v1")
+    env.reset(seed=0)
+    result = env.step(0)
+    assert result.observation.shape == (5,)
+    print("  [PASS] Pong step")
+
+
+def test_pong_full_episode():
+    env = world.make("Pong-v1")
+    obs, _ = env.reset(seed=7)
+    total_reward = 0.0
+    done = False
+    while not done:
+        ball_y = obs[1]
+        paddle_y = obs[4]
+        action = 1 if ball_y > paddle_y + 0.05 else 0
+        result = env.step(action)
+        total_reward += result.reward
+        done = result.done
+        if done:
+            break
+        obs = result.observation
+    env.close()
+    assert total_reward >= -100.0
+    print(f"  [PASS] Pong full episode (reward={total_reward:.0f})")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Wrapper tests
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -159,7 +201,7 @@ def test_record_episode_wrapper():
 
 def test_registry():
     r = world.registry()
-    for key in ["FrozenLake-v0", "FrozenLake-v1", "FrozenLake8x8-v1", "CartPole-v1"]:
+    for key in ["FrozenLake-v0", "FrozenLake-v1", "FrozenLake8x8-v1", "CartPole-v1", "Pong-v1"]:
         assert key in r, f"{key} not in registry"
     print("  [PASS] Registry contains all built-in envs")
 
@@ -189,6 +231,9 @@ if __name__ == "__main__":
         test_cartpole_step,
         test_cartpole_full_episode,
         test_cartpole_invalid_action,
+        test_pong_reset,
+        test_pong_step,
+        test_pong_full_episode,
         test_time_limit_wrapper,
         test_record_episode_wrapper,
         test_registry,

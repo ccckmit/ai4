@@ -126,6 +126,53 @@ fn test_time_limit_wrapper() {
 }
 
 #[test]
+fn test_pong_reset() {
+    use crate::world::envs::PongEnv;
+    let mut env = PongEnv::new(1000, None);
+    let (obs, _info) = env.reset(Some(0));
+    assert_eq!(obs.len(), 5_usize, "Expected shape (5,), got {:?}", obs);
+    assert!((obs[0] - 0.5).abs() < 0.001, "ball_x should start at 0.5");
+    assert!((obs[1] - 0.5).abs() < 0.001, "ball_y should start at 0.5");
+    assert!((obs[4] - 0.5).abs() < 0.001, "paddle_y should start at 0.5");
+}
+
+#[test]
+fn test_pong_step() {
+    use crate::world::envs::PongEnv;
+    let mut env = PongEnv::new(1000, None);
+    env.reset(Some(0));
+    let result = env.step(0);
+    assert_eq!(result.observation.len(), 5);
+}
+
+#[test]
+fn test_pong_full_episode() {
+    use crate::world::envs::PongEnv;
+    let mut env = PongEnv::new(1000, None);
+    let mut done = false;
+    let mut total_reward = 0.0;
+    let mut obs = env.reset(Some(7)).0;
+    while !done {
+        let ball_y = obs[1];
+        let paddle_y = obs[4];
+        let action = if ball_y > paddle_y + 0.05 { 1 } else { 0 };
+        let result = env.step(action);
+        total_reward += result.reward;
+        done = result.done();
+        if done { break; }
+        obs = result.observation;
+    }
+    assert!(total_reward >= -100.0);
+}
+
+#[test]
+fn test_pong_invalid_action() {
+    use crate::world::envs::PongEnv;
+    let mut env = PongEnv::new(1000, None);
+    let (_, _) = env.reset(Some(0));
+}
+
+#[test]
 fn test_registry() {
     let r = crate::world::registry();
     assert!(r.contains(&"FrozenLake-v0".to_string()));

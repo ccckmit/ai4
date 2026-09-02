@@ -14,7 +14,7 @@ Quick start
 
 from .core import Env, StepResult
 from .spaces import Discrete, Box
-from .envs import FrozenLakeEnv, CartPoleEnv, BipedalWalkerEnv
+from .envs import FrozenLakeEnv, CartPoleEnv, BipedalWalkerEnv, PongEnv
 from .wrappers import TimeLimitWrapper, RecordEpisodeWrapper
 from .utils import register, make, registry, run_random_agent
 
@@ -26,6 +26,7 @@ register("FrozenLake-v1",     FrozenLakeEnv, map_name="4x4", is_slippery=True)
 register("FrozenLake8x8-v1",  FrozenLakeEnv, map_name="8x8", is_slippery=True)
 register("CartPole-v1",       CartPoleEnv,   max_steps=500)
 register("BipedalWalker-v3", BipedalWalkerEnv, max_steps=1600)
+register("Pong-v1", PongEnv, max_steps=1000)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -34,7 +35,7 @@ __all__ = [
     # Spaces
     "Discrete", "Box",
     # Environments
-    "FrozenLakeEnv", "CartPoleEnv", "BipedalWalkerEnv",
+    "FrozenLakeEnv", "CartPoleEnv", "BipedalWalkerEnv", "PongEnv",
     # Wrappers
     "TimeLimitWrapper", "RecordEpisodeWrapper",
     # Utils

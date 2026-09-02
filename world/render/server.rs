@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-/// Embedded viewer HTML (shared with TypeScript world/render/viewer.html)
+/// Default viewer HTML (CartPole)
 const HTML: &str = include_str!("viewer.html");
 
 /// A lightweight HTTP+WS server that serves viewer.html and broadcasts
@@ -19,10 +19,15 @@ pub struct RenderServer {
 
 impl RenderServer {
     /// Start the server on `port`. Spawns a background thread that:
-    ///   1. Serves `viewer.html` for plain HTTP GET /
+    ///   1. Serves embedded HTML for plain HTTP GET /
     ///   2. Accepts WebSocket upgrades for live frame streaming
     ///   3. Each WS client polls `latest_frame` at ~30 fps
     pub fn start(port: u16) -> Self {
+        Self::start_with_html(port, HTML)
+    }
+
+    /// Like `start` but with a custom viewer HTML.
+    pub fn start_with_html(port: u16, html: &'static str) -> Self {
         let latest = Arc::new(Mutex::new(String::new()));
         let latest_clone = latest.clone();
 
@@ -50,7 +55,7 @@ impl RenderServer {
                     Ok(stream) => {
                         let latest = latest_clone.clone();
                         thread::spawn(move || {
-                            dispatch(stream, latest);
+                            dispatch(stream, latest, html);
                         });
                     }
                     Err(_) => break,
@@ -79,7 +84,7 @@ fn open_browser(port: u16) {
     let _ = std::process::Command::new(cmd).arg(&url).spawn();
 }
 
-fn dispatch(mut stream: std::net::TcpStream, latest: Arc<Mutex<String>>) {
+fn dispatch(mut stream: std::net::TcpStream, latest: Arc<Mutex<String>>, html: &str) {
     // Peek at the first bytes to decide: WebSocket upgrade or plain HTTP?
     let mut buf = [0u8; 4096];
     let n = match stream.peek(&mut buf) {
@@ -91,15 +96,15 @@ fn dispatch(mut stream: std::net::TcpStream, latest: Arc<Mutex<String>>) {
     if request.to_lowercase().contains("upgrade: websocket") {
         handle_ws(stream, latest);
     } else {
-        serve_html(stream);
+        serve_html(stream, html);
     }
 }
 
-fn serve_html(mut stream: std::net::TcpStream) {
+fn serve_html(mut stream: std::net::TcpStream, html: &str) {
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
-        HTML.len(),
-        HTML
+        html.len(),
+        html
     );
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();

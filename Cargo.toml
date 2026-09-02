@@ -40,6 +40,14 @@ name = "chargpt_demo"
 path = "nn/chargpt_demo.rs"
 
 [[bin]]
+name = "world_pong_closed_form"
+path = "world/examples/pong_closed_form.rs"
+
+[[bin]]
+name = "world_pong_render_test"
+path = "world/render/test_pong.rs"
+
+[[bin]]
 name = "world_cartpole_render_test"
 path = "world/render/test_ws.rs"
 [[bin]]
