@@ -3,7 +3,7 @@
 共用的 softmax / Adam / 訓練 / 取樣邏輯在 common.py，資料載入在 data.py。"""
 
 import numpy as np
-from common import Adam, softmax  # Adam 在此重新匯出，nn.Adam 仍可使用
+from .common import Adam, softmax  # Adam 在此重新匯出，nn.Adam 仍可使用
 
 
 class GPT:

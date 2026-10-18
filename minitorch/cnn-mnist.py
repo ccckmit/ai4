@@ -1,8 +1,6 @@
 """使用 NumPy tensor 版 nn.CNN 訓練 MNIST 手寫數字辨識。"""
 
-import nn
-import common
-import data
+from minitorch import common, data, nn
 
 dataset = data.load_mnist()
 model = nn.CNN()

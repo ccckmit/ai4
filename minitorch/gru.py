@@ -1,9 +1,7 @@
 """使用 NumPy tensor 版 nn 訓練字元級 GRU；請由範例庫載入。"""
 
 import random
-import nn
-import common
-import data
+from minitorch import common, data, nn
 
 random.seed(42)
 corpus = data.CharCorpus('input.txt', block_size=16)
